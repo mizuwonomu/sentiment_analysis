@@ -1,0 +1,75 @@
+{
+  "builder_name": "parquet",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "vietnamese_students_feedback",
+  "dataset_size": 1575938,
+  "description": "",
+  "download_checksums": {
+    "hf://datasets/chapter544ou/vietnamese_students_feedback@3a16e0a93465aeed309771aa7e46de31d130b598/data/train-00000-of-00001.parquet": {
+      "num_bytes": 469275,
+      "checksum": null
+    },
+    "hf://datasets/chapter544ou/vietnamese_students_feedback@3a16e0a93465aeed309771aa7e46de31d130b598/data/validation-00000-of-00001.parquet": {
+      "num_bytes": 62593,
+      "checksum": null
+    },
+    "hf://datasets/chapter544ou/vietnamese_students_feedback@3a16e0a93465aeed309771aa7e46de31d130b598/data/test-00000-of-00001.parquet": {
+      "num_bytes": 131718,
+      "checksum": null
+    }
+  },
+  "download_size": 663586,
+  "features": {
+    "sentence": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "sentiment": {
+      "names": [
+        "negative",
+        "neutral",
+        "positive"
+      ],
+      "_type": "ClassLabel"
+    },
+    "topic": {
+      "names": [
+        "lecturer",
+        "training_program",
+        "facility",
+        "others"
+      ],
+      "_type": "ClassLabel"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 2239524,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 1118042,
+      "num_examples": 11426,
+      "dataset_name": "vietnamese_students_feedback"
+    },
+    "validation": {
+      "name": "validation",
+      "num_bytes": 149101,
+      "num_examples": 1583,
+      "dataset_name": "vietnamese_students_feedback"
+    },
+    "test": {
+      "name": "test",
+      "num_bytes": 308795,
+      "num_examples": 3166,
+      "dataset_name": "vietnamese_students_feedback"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}
