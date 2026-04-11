@@ -4,6 +4,8 @@ import json
 import os
 from datasets import load_dataset
 from collections import Counter
+from pyvi import ViTokenizer
+
 
 class FeedbackProcessor:
     def __init__(self, max_length = 50, device="cuda"):
@@ -11,6 +13,22 @@ class FeedbackProcessor:
         self.device = device
         self.vocab = {"<PAD>": 0, "<UNK>": 1}
         self.id_to_word = {0: "<PAD>", 1: "<UNK>"}
+
+        #load json viết tắt
+        base_dir = os.path.dirname(__file__)  # src/
+        file_path = os.path.join(base_dir, "..", "datasets", "processed", "abbre.json")
+        file_path = os.path.abspath(file_path)  # normalize path
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            self.ABBREVIATIONS = json.load(f)
+
+        #pattern -> viết tắt  
+        self.pattern = re.compile(
+            r'\b(' + '|'.join(map(re.escape, self.ABBREVIATIONS.keys())) + r')\b'  
+        )
+
+        #pattern -> dạng colon ()
+        self.colon_pattern = re.compile(r'\b\w*colon\w*\b')              
 
     def load_data(self):
         print("---Đang tải datasets UIT ---")
@@ -24,19 +42,40 @@ class FeedbackProcessor:
         print(f"Đã tải xong! Train: {len(self.train_raw)} câu.")
 
     def clean_text(self, text):
-        text = text.lower()
+        text = text.lower()  
 
         #Chỉ giữ lại chữ cái, số và một số dấu câu quan trọng cho cảm xúc
+        text = re.sub(r'([!?.,])', r' \1 ', text)       #LINH: tách kí tự đặc biệt khỏi chữ vd hello!! -> hello ! !
         text = re.sub(r'[^\w\s!?]', '', text)
         text = re.sub(r'\s+', ' ', text).strip()
         return text
+    
+    #Chuyển viết tắt -> thường -- LINH
+    def normalize_abbreviation(self, text):                    
+        return self.pattern.sub(lambda x: self.ABBREVIATIONS[x.group()], text)
+    
+    #remove emoji -- LINH
+    def remove_emoji(self, text):
+        return self.colon_pattern.sub('', text)
+    
+    #pyvi token các từ Việt -- LINH
+    def tokenize(self, text):
+        return ViTokenizer.tokenize(text)
+    
+    #làm gọn process -- LINH
+    def process_text(self, text):
+        text = self.remove_emoji(text)
+        text = self.clean_text(text)
+        text = self.normalize_abbreviation(text)
+        
+        return self.tokenize(text)
 
     def build_vocab(self, min_freq = 1):
         print("--Xây dựng bộ vocab ---")
         all_words = []
         for item in self.train_raw:
-            cleaned = self.clean_text(item['sentence'])
-            all_words.extend(cleaned.split())
+            processed = self.process_text(item['sentence'])
+            all_words.extend(processed.split())
         
         #Đếm tần suất và chỉ giữ lại từ xuất hiện nhiều hơn min_freq (tránh stop words nhiều)
         word_counts = Counter(all_words)
@@ -59,10 +98,10 @@ class FeedbackProcessor:
         labels = []
 
         for item in data_split:
-            cleaned = self.clean_text(item['sentence'])
+            processed = self.process_text(item['sentence'])
 
             #Encode: chuyển chữ thành ID, không có trong vocab -> dùng <UNK>
-            ids = [self.vocab.get(word, self.vocab["<UNK>"]) for word in cleaned.split()]
+            ids = [self.vocab.get(word, self.vocab["<UNK>"]) for word in processed.split()]
 
             #Padding and transition
             padded_ids = self._pad_sequence(ids)
@@ -70,8 +109,8 @@ class FeedbackProcessor:
             input_ids.append(padded_ids)
             labels.append(item['sentiment'])
 
-        return (torch.tensor(input_ids).to(self.device),
-                torch.tensor(labels).to(self.device))
+        return (torch.tensor(input_ids, dtype=torch.long).to(self.device),
+                torch.tensor(labels, dtype=torch.long).to(self.device))
 
     def save_processed(self, path="datasets/processed", X_train=None, y_train=None, x_test=None, y_test=None):
         if not os.path.exists(path):
@@ -90,7 +129,7 @@ class FeedbackProcessor:
 
     def load_processed(self, path="datasets/processed"):
         with open(f"{path}/vocab.json", "r", encoding="utf-8") as f:
-            self.vocab = json.dump(f)
+            self.vocab = json.load(f)
             self.id_to_word = {int(v): k for k,v in self.vocab.items()}
 
         data = torch.load(f"{path}/tensors.pt", map_location=self.device)
