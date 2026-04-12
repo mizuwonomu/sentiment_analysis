@@ -56,3 +56,21 @@ history = model.fit(X_tfidf.toarray(), train_data['sentiment'],
                     batch_size=32, 
                     validation_split=0.2) # Trích 20% dữ liệu để tự kiểm tra
 model.save('baseline_ann_model.h5')
+import numpy as np
+
+# 1. Nhập câu muốn kiểm tra (Giả sử đây là câu người dùng gõ vào)
+test_sentence = "Giảng viên nhiệt tình, bài giảng dễ hiểu"
+
+# 2. Bước cực kỳ quan trọng: Phải dùng lại đúng bộ tfidf đã train để biến câu này thành số
+# (Nếu không máy sẽ không hiểu các con số đầu vào)
+test_tfidf = tfidf.transform([test_sentence])
+
+# 3. Dự đoán
+prediction = model.predict(test_tfidf.toarray())
+label_idx = np.argmax(prediction)
+
+# 4. Giải mã nhãn (Dựa trên cấu trúc dữ liệu Linh đã chuẩn bị) [cite: 14]
+labels = {0: "Tiêu cực (Negative)", 1: "Trung tính (Neutral)", 2: "Tích cực (Positive)"}
+
+print(f"\nCâu test: {test_sentence}")
+print(f"Kết quả dự đoán: {labels[label_idx]} (Độ tin cậy: {np.max(prediction)*100:.2f}%)")
