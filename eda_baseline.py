@@ -77,4 +77,18 @@ print(f"Kết quả dự đoán: {labels[label_idx]} (Độ tin cậy: {np.max(p
 import joblib
 # Lưu bộ vectorizer
 joblib.dump(tfidf, 'tfidf_vectorizer.pkl')
+import joblib
+import os
 
+# Tạo thư mục models nếu chưa có (để đảm bảo không lỗi)
+if not os.path.exists('models'):
+    os.makedirs('models')
+
+# LƯU Ý QUAN TRỌNG: Thêm đường dẫn 'models/' vào trước tên file
+# 1. Lưu bộ vectorizer
+joblib.dump(tfidf, 'models/tfidf_vectorizer.pkl')
+
+# 2. Lưu mô hình ANN
+model.save('models/baseline_ann_model.h5')
+
+print("\n--- Đã lưu Model và TF-IDF vào folder models thành công! ---")
