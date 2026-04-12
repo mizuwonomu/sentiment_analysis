@@ -9,3 +9,10 @@ wheels/
 # Virtual environments
 .venv
 
+#github skills agent
+.github/
+
+#models parameters, config
+models/
+*.pt
+*.pkl

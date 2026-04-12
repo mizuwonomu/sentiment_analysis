@@ -3,7 +3,7 @@ import os
 import torch
 
 processed_path = "datasets/processed"
-processor = FeedbackProcessor(max_length=40, device="cuda" if torch.cuda.is_available() else "cpu")
+processor = FeedbackProcessor(max_length=50, device="cuda" if torch.cuda.is_available() else "cpu")
 
 if os.path.exists(f"{processed_path}/tensors.pt"):
     X_train, y_train, x_test, y_test = processor.load_processed(processed_path)
