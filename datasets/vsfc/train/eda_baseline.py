@@ -74,3 +74,7 @@ labels = {0: "Tiêu cực (Negative)", 1: "Trung tính (Neutral)", 2: "Tích c�
 
 print(f"\nCâu test: {test_sentence}")
 print(f"Kết quả dự đoán: {labels[label_idx]} (Độ tin cậy: {np.max(prediction)*100:.2f}%)")
+import joblib
+# Lưu bộ vectorizer
+joblib.dump(tfidf, 'tfidf_vectorizer.pkl')
+
