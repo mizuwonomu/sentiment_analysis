@@ -16,3 +16,8 @@ wheels/
 models/
 *.pt
 *.pkl
+
+#ignore experiment outputs and checkpoints
+checkpoints/
+outputs/
+reports/figure/
