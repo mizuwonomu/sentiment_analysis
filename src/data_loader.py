@@ -38,6 +38,7 @@ class FeedbackProcessor:
         #Có 3 phần data: train, valid và test
         #Mỗi phần có 2 cột chính: 'sentence' và 'sentiment' (0: Neg, 1: Neu, 2: Pos)
         self.train_raw = dataset['train']
+        self.val_raw = dataset['validation']
         self.test_raw = dataset['test']
         print(f"Đã tải xong! Train: {len(self.train_raw)} câu.")
 

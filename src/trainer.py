@@ -47,12 +47,16 @@ def prepare_ann_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, Tfidf
     x_tensor = torch.tensor(x_tfidf, dtype=torch.float32)
     y_tensor = torch.tensor(train_labels, dtype=torch.long)
 
-    full_dataset = TensorDataset(x_tensor, y_tensor)
-    val_size = int(data_cfg["val_split_ratio"] * len(full_dataset))
-    train_size = len(full_dataset) - val_size
+    full_train_dataset = TensorDataset(x_tensor, y_tensor)
 
-    train_ds, val_ds = random_split(full_dataset, [train_size, val_size])
-    train_loader = DataLoader(train_ds, batch_size=training_cfg["batch_size"], shuffle=True)
+    train_loader = DataLoader(full_train_dataset, batch_size=training_cfg["batch_size"], shuffle=True)
+
+    val_texts = [processor.process_text(item["sentence"]) for item in processor.val_raw]
+    val_labels = [item["sentiment"] for item in processor.val_raw]
+    x_val_tfidf = tfidf.transform(val_texts).toarray()
+    x_val_tensor = torch.tensor(x_val_tfidf, dtype=torch.float32)
+    y_val_tensor = torch.tensor(val_labels, dtype=torch.long)
+    val_ds = TensorDataset(x_val_tensor, y_val_tensor)
     val_loader = DataLoader(val_ds, batch_size=training_cfg["batch_size"], shuffle=False)
 
     return train_loader, val_loader, tfidf
@@ -105,7 +109,7 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
         "train_acc": [],
         "val_acc": [],
     }
-    best_val_acc = float("-inf")
+    best_val_loss = float("inf")
     best_epoch = -1
 
     epochs = config["training"]["epochs"]
@@ -170,14 +174,15 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
         epoch_ckpt_path = checkpoints_dir / f"{model_name}_epoch_{epoch + 1:02d}.pt"
         torch.save(checkpoint_payload, epoch_ckpt_path)
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
             best_epoch = epoch + 1
             torch.save(checkpoint_payload, checkpoints_dir / f"{model_name}_best_model.pt")
 
         print(
             f"Epoch {epoch + 1}/{epochs} | "
-            f"Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}"
+            f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
+            f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}"
         )
 
     torch.save(

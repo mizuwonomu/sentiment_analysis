@@ -3,7 +3,6 @@ data:
   max_length: 50
   max_features: 1000
   max_Features: 1000
-  val_split_ratio: 0.2
   min_freq: 2
 
 models:
