@@ -16,6 +16,7 @@ wheels/
 models/
 *.pt
 *.pkl
+experiment*.yaml
 
 #ignore experiment outputs and checkpoints
 checkpoints/
