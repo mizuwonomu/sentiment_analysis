@@ -96,7 +96,13 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
-    criterion = nn.CrossEntropyLoss()
+    #0: neg, 1: neu, 2: pos cho weight balancing với inverse
+    #11426 data, 5325 pos, 5643 neg, 458 neu
+    #vậy weight pos = 0.715, neu = 8.315, 0.674
+    class_weights = torch.tensor(config["training"]["class_weights"], dtype=torch.float32)
+    class_weights = class_weights.to(device)
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=config["training"]["learning_rate"],
