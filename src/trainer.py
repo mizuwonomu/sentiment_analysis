@@ -1,20 +1,44 @@
 import random
+import os
+import importlib.util
 from pathlib import Path
 from typing import Dict, Tuple
 
 import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns   
+import mlflow
+import mlflow.pytorch
 import numpy as np
 import torch
 import torch.nn as nn
 import yaml
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics import accuracy_score
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
 from .data_loader import FeedbackProcessor
 from .models import ANNClassifier
 from .utils import load_config
 
+MLFLOW_AVAILABLE = importlib.util.find_spec("mlflow") is not None
+if MLFLOW_AVAILABLE:
+    import mlflow
+    import mlflow.pytorch
+else:
+    mlflow = None
+
+def flatten_dict(data: Dict, parent_key: str = "", sep: str = ".") -> Dict[str, str]:
+    """Flatten nested config for MLflow param logging."""
+    items = {}
+    for key, value in data.items():
+        new_key = f"{parent_key}{sep}{key}" if parent_key else key
+        if isinstance(value, dict):
+            items.update(flatten_dict(value, new_key, sep=sep))
+        else:
+            items[new_key] = value
+    return items
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
@@ -118,7 +142,21 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
     best_val_loss = float("inf")
     best_epoch = -1
 
+    tracking_cfg = config.get("tracking", {}).get("mlflow", {})
+    logging_cfg = config.get("logging", {})
+    env_mlflow_enabled = os.getenv("MLFLOW_ENABLED", "0") == "1"
+    mlflow_enabled = bool(logging_cfg.get("enabled", False) or env_mlflow_enabled)
+    should_log_mlflow = MLFLOW_AVAILABLE and mlflow_enabled
+    if should_log_mlflow:
+        mlflow.set_tracking_uri(tracking_cfg.get("tracking_uri", "file:./mlruns"))
+        mlflow.set_experiment(tracking_cfg.get("experiment_name", "vsfc_ann_baseline"))
+
     epochs = config["training"]["epochs"]
+    run_name = tracking_cfg.get("run_name", f"{model_name}_baseline")
+    run_ctx = mlflow.start_run(run_name=run_name) if should_log_mlflow else None
+    if should_log_mlflow:
+        mlflow.log_params(flatten_dict(config))
+
     for epoch in range(epochs):
         model.train()
         train_loss_sum = 0.0
@@ -185,6 +223,18 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
             best_epoch = epoch + 1
             torch.save(checkpoint_payload, checkpoints_dir / f"{model_name}_best_model.pt")
 
+        if should_log_mlflow:
+            mlflow.log_metrics(
+                {
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "train_acc": train_acc,
+                    "val_acc": val_acc,
+                },
+                step=epoch + 1,
+            )
+        
+
         print(
             f"Epoch {epoch + 1}/{epochs} | "
             f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
@@ -219,6 +269,73 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
 
     with open(outputs_dir / f"{model_name}_history.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(history, f, sort_keys=False, allow_unicode=True)
+
+    model.eval()
+    final_val_preds, final_val_targets = [], []
+    with torch.no_grad():
+        for x_batch, y_batch in val_loader:
+            x_batch = x_batch.to(device)
+            logits = model(x_batch)
+            preds = torch.argmax(logits, dim=1)
+            final_val_preds.extend(preds.detach().cpu().numpy())
+            final_val_targets.extend(y_batch.detach().cpu().numpy())
+
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        final_val_targets, final_val_preds, average="macro", zero_division=0
+    )
+    eval_metrics = {
+        "final_val_accuracy": accuracy_score(final_val_targets, final_val_preds),
+        "final_val_precision": precision,
+        "final_val_recall": recall,
+        "final_val_f1": f1,
+        "best_val_loss": best_val_loss,
+        "best_epoch": best_epoch,
+    }
+
+    if should_log_mlflow:
+        mlflow.log_metrics(eval_metrics)
+        mlflow.log_artifact(str(outputs_dir / f"{model_name}_config.yaml"), artifact_path="outputs")
+        mlflow.log_artifact(str(outputs_dir / f"{model_name}_history.yaml"), artifact_path="outputs")
+        mlflow.log_artifacts(str(checkpoints_dir), artifact_path="checkpoints")
+        mlflow.log_artifact(str(vectorizer_path), artifact_path="models")
+        mlflow.pytorch.log_model(model.cpu(), artifact_path="model")
+
+        epochs_axis = np.arange(1, len(history["train_loss"]) + 1)
+        fig_loss, ax_loss = plt.subplots(figsize=(8, 5))
+        ax_loss.plot(epochs_axis, history["train_loss"], marker="o", label="Train Loss")
+        ax_loss.plot(epochs_axis, history["val_loss"], marker="o", label="Val Loss")
+        ax_loss.set_title("Training vs Validation Loss")
+        ax_loss.set_xlabel("Epoch")
+        ax_loss.set_ylabel("Loss")
+        ax_loss.legend()
+        fig_loss.tight_layout()
+        mlflow.log_figure(fig_loss, f"figures/{model_name}_loss_curve.png")
+        plt.close(fig_loss)
+
+        fig_acc, ax_acc = plt.subplots(figsize=(8, 5))
+        ax_acc.plot(epochs_axis, history["train_acc"], marker="o", label="Train Accuracy")
+        ax_acc.plot(epochs_axis, history["val_acc"], marker="o", label="Val Accuracy")
+        ax_acc.set_title("Training vs Validation Accuracy")
+        ax_acc.set_xlabel("Epoch")
+        ax_acc.set_ylabel("Accuracy")
+        ax_acc.legend()
+        fig_acc.tight_layout()
+        mlflow.log_figure(fig_acc, f"figures/{model_name}_accuracy_curve.png")
+        plt.close(fig_acc)
+
+        cm = confusion_matrix(final_val_targets, final_val_preds)
+        fig_cm, ax_cm = plt.subplots(figsize=(7, 6))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax_cm)
+        ax_cm.set_title("Validation Confusion Matrix")
+        ax_cm.set_xlabel("Predicted")
+        ax_cm.set_ylabel("True")
+        fig_cm.tight_layout()
+        mlflow.log_figure(fig_cm, f"figures/{model_name}_confusion_matrix.png")
+        plt.close(fig_cm)
+
+        mlflow.end_run()
+    elif mlflow_enabled and not MLFLOW_AVAILABLE:
+        print("MLflow logging is enabled in config, but mlflow package is not installed. Skipping MLflow.")
 
     print(f"Saved config/history to: {outputs_dir}")
 

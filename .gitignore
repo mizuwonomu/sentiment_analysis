@@ -22,3 +22,7 @@ experiment*.yaml
 checkpoints/
 outputs/
 reports/figure/
+
+#tracking
+mlflow.db
+mlruns/
