@@ -14,7 +14,7 @@ class FeedbackProcessor:
         self.vocab = {"<PAD>": 0, "<UNK>": 1}
         self.id_to_word = {0: "<PAD>", 1: "<UNK>"}
 
-        #load json viết tắt
+        #load json viết tắt, abbreviation đã được có data chuẩn hoá từ trước
         base_dir = os.path.dirname(__file__)  # src/
         file_path = os.path.join(base_dir, "..", "datasets", "processed", "abbre.json")
         file_path = os.path.abspath(file_path)  # normalize path
@@ -25,7 +25,7 @@ class FeedbackProcessor:
         #pattern -> viết tắt  
         self.pattern = re.compile(
             r'\b(' + '|'.join(map(re.escape, self.ABBREVIATIONS.keys())) + r')\b'  
-        )
+        ) #kí hiệu \b: boundary, chỉ khớp nếu từ đó đứng độc lập (trước và sau nó là dấu câu hoặc space)
 
         #pattern -> dạng colon ()
         self.colon_pattern = re.compile(r'\b\w*colon\w*\b')              
@@ -38,6 +38,7 @@ class FeedbackProcessor:
         #Có 3 phần data: train, valid và test
         #Mỗi phần có 2 cột chính: 'sentence' và 'sentiment' (0: Neg, 1: Neu, 2: Pos)
         self.train_raw = dataset['train']
+        self.val_raw = dataset['validation']
         self.test_raw = dataset['test']
         print(f"Đã tải xong! Train: {len(self.train_raw)} câu.")
 
@@ -46,8 +47,8 @@ class FeedbackProcessor:
 
         #Chỉ giữ lại chữ cái, số và một số dấu câu quan trọng cho cảm xúc
         text = re.sub(r'([!?.,])', r' \1 ', text)       #LINH: tách kí tự đặc biệt khỏi chữ vd hello!! -> hello ! !
-        text = re.sub(r'[^\w\s!?]', '', text)
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r'[^\w\s!?]', '', text) #chỉ giữ lại \w: word, \s: space, dấu ! và ?
+        text = re.sub(r'\s+', ' ', text).strip() #loại đi nhiều hơn 1 khoảng trắng
         return text
     
     #Chuyển viết tắt -> thường -- LINH
