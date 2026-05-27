@@ -102,11 +102,22 @@ def _prepare_feature_matrices(
             raise ValueError("Only mean pooling is currently supported for Word2Vec features.")
 
         vector_size = word2vec_cfg["vector_size"]
+        embedding_source = word2vec_cfg.get("embedding_source", "input")
         train_tokens = [text.split() for text in train_texts]
         val_tokens = [text.split() for text in val_texts]
         word2vec = feature_encoder or train_word2vec(train_tokens, word2vec_cfg)
-        x_train = texts_to_mean_vectors(train_tokens, word2vec, vector_size)
-        x_val = texts_to_mean_vectors(val_tokens, word2vec, vector_size)
+        x_train = texts_to_mean_vectors(
+            train_tokens,
+            word2vec,
+            vector_size,
+            embedding_source=embedding_source,
+        )
+        x_val = texts_to_mean_vectors(
+            val_tokens,
+            word2vec,
+            vector_size,
+            embedding_source=embedding_source,
+        )
         return x_train, x_val, word2vec
 
     raise ValueError(f"Unsupported feature type: {feature_type}")
