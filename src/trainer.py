@@ -59,6 +59,19 @@ def _get_feature_tag(feature_type: str) -> str:
     return "w2vec" if feature_type == "word2vec" else feature_type
 
 
+def _is_meaningful_loss_improvement(current_loss: float, best_loss: float, min_delta: float) -> bool:
+    return current_loss < best_loss - min_delta
+
+
+def _is_loss_plateauing(val_losses: list[float], window: int, fluctuation_delta: float) -> bool:
+    if window <= 1 or len(val_losses) < window:
+        return False
+
+    recent_losses = val_losses[-window:]
+    loss_range = max(recent_losses) - min(recent_losses)
+    return loss_range <= fluctuation_delta and recent_losses[-1] >= recent_losses[0]
+
+
 def _prepare_feature_matrices(
     config: Dict,
     train_texts: list[str],
@@ -202,6 +215,14 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
         mlflow.set_experiment(tracking_cfg.get("experiment_name", "vsfc_ann_baseline"))
 
     epochs = config["training"]["epochs"]
+    early_stopping_cfg = config["training"].get("early_stopping", {})
+    early_stopping_enabled = early_stopping_cfg.get("enabled", False)
+    early_stopping_patience = early_stopping_cfg.get("patience", 3)
+    early_stopping_min_delta = early_stopping_cfg.get("min_delta", 0.001)
+    early_stopping_fluctuation_delta = early_stopping_cfg.get("fluctuation_delta", 0.05)
+    early_stopping_window = early_stopping_patience + 1
+    epochs_without_meaningful_improvement = 0
+
     run_name = tracking_cfg.get("run_name", f"{model_name}_baseline")
     run_ctx = mlflow.start_run(run_name=run_name) if should_log_mlflow else None
     if should_log_mlflow:
@@ -268,10 +289,27 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
         epoch_ckpt_path = checkpoints_dir / f"{artifact_name}_epoch_{epoch + 1:02d}.pt"
         torch.save(checkpoint_payload, epoch_ckpt_path)
 
+        has_meaningful_improvement = _is_meaningful_loss_improvement(
+            val_loss,
+            best_val_loss,
+            early_stopping_min_delta,
+        )
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch + 1
             torch.save(checkpoint_payload, checkpoints_dir / f"{artifact_name}_best_model.pt")
+
+        if has_meaningful_improvement:
+            epochs_without_meaningful_improvement = 0
+        else:
+            epochs_without_meaningful_improvement += 1
+
+        is_plateauing = _is_loss_plateauing(
+            history["val_loss"],
+            early_stopping_window,
+            early_stopping_fluctuation_delta,
+        )
 
         if should_log_mlflow:
             mlflow.log_metrics(
@@ -291,14 +329,42 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
             f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}"
         )
 
+        if early_stopping_enabled and not has_meaningful_improvement:
+            print(
+                "Early stopping monitor: "
+                f"{epochs_without_meaningful_improvement}/{early_stopping_patience} "
+                "epochs without validation-loss improvement. "
+                f"Best Val Loss: {best_val_loss:.4f}"
+            )
+
+        if (
+            early_stopping_enabled
+            and (
+                epochs_without_meaningful_improvement >= early_stopping_patience
+                or is_plateauing
+            )
+        ):
+            print(
+                "Early stopping triggered: "
+                f"validation loss did not improve by at least {early_stopping_min_delta:.4f} "
+                f"for {early_stopping_patience} consecutive epochs, or plateaued within "
+                f"{early_stopping_fluctuation_delta:.4f}. "
+                f"Best epoch: {best_epoch} | Best Val Loss: {best_val_loss:.4f}"
+            )
+            break
+
+    epochs_ran = len(history["train_loss"])
+
     torch.save(
         {
-            "epoch": epochs,
+            "epoch": epochs_ran,
             "model_name": artifact_name,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "history": history,
             "config": config,
+            "best_epoch": best_epoch,
+            "best_val_loss": best_val_loss,
         },
         checkpoints_dir / f"{artifact_name}_last_model.pt",
     )
