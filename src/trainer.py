@@ -16,7 +16,11 @@ from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_f
 from torch.utils.data import DataLoader, TensorDataset
 
 from .data_loader import FeedbackProcessor
-from .embeddings import texts_to_mean_vectors, train_word2vec
+from .embeddings import (
+    texts_to_mean_vectors,
+    texts_to_tfidf_weighted_vectors,
+    train_word2vec,
+)
 from .models import ANNClassifier
 from .utils import load_config
 
@@ -98,27 +102,69 @@ def _prepare_feature_matrices(
 
     if feature_type == "word2vec":
         word2vec_cfg = features_cfg["word2vec"]
-        if word2vec_cfg.get("pooling", "mean") != "mean":
-            raise ValueError("Only mean pooling is currently supported for Word2Vec features.")
+        pooling = word2vec_cfg.get("pooling", "mean")
+        if pooling not in {"mean", "tfidf_weighted_mean"}:
+            raise ValueError(
+                "Only mean and tfidf_weighted_mean pooling are currently supported "
+                "for Word2Vec features."
+            )
 
         vector_size = word2vec_cfg["vector_size"]
         embedding_source = word2vec_cfg.get("embedding_source", "input")
         train_tokens = [text.split() for text in train_texts]
         val_tokens = [text.split() for text in val_texts]
-        word2vec = feature_encoder or train_word2vec(train_tokens, word2vec_cfg)
-        x_train = texts_to_mean_vectors(
+
+        if isinstance(feature_encoder, dict):
+            word2vec = feature_encoder["word2vec"]
+            tfidf = feature_encoder.get("tfidf")
+        else:
+            word2vec = feature_encoder or train_word2vec(train_tokens, word2vec_cfg)
+            tfidf = None
+
+        if pooling == "mean":
+            x_train = texts_to_mean_vectors(
+                train_tokens,
+                word2vec,
+                vector_size,
+                embedding_source=embedding_source,
+            )
+            x_val = texts_to_mean_vectors(
+                val_tokens,
+                word2vec,
+                vector_size,
+                embedding_source=embedding_source,
+            )
+            return x_train, x_val, {"word2vec": word2vec}
+
+        tfidf_cfg = features_cfg.get("tfidf", {})
+        max_features = tfidf_cfg.get(
+            "max_features",
+            data_cfg.get("max_features", data_cfg.get("max_Features")),
+        )
+        if tfidf is None:
+            tfidf = TfidfVectorizer(max_features=max_features)
+            train_tfidf = tfidf.fit_transform(train_texts)
+        else:
+            train_tfidf = tfidf.transform(train_texts)
+        val_tfidf = tfidf.transform(val_texts)
+
+        x_train = texts_to_tfidf_weighted_vectors(
             train_tokens,
+            train_tfidf,
+            tfidf.vocabulary_,
             word2vec,
             vector_size,
             embedding_source=embedding_source,
         )
-        x_val = texts_to_mean_vectors(
+        x_val = texts_to_tfidf_weighted_vectors(
             val_tokens,
+            val_tfidf,
+            tfidf.vocabulary_,
             word2vec,
             vector_size,
             embedding_source=embedding_source,
         )
-        return x_train, x_val, word2vec
+        return x_train, x_val, {"word2vec": word2vec, "tfidf": tfidf}
 
     raise ValueError(f"Unsupported feature type: {feature_type}")
 
@@ -384,22 +430,28 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
     models_dir.mkdir(parents=True, exist_ok=True)
 
     model_path = models_dir / f"{artifact_name}_baseline_model.pt"
-    feature_encoder_path = models_dir / (
-        f"{artifact_name}_tfidf_vectorizer.pkl"
-        if feature_type == "tfidf"
-        else f"{artifact_name}_word2vec_model.model"
-    )
+    feature_encoder_paths = []
 
     torch.save(model.state_dict(), model_path)
     if feature_type == "tfidf":
+        feature_encoder_path = models_dir / f"{artifact_name}_tfidf_vectorizer.pkl"
         joblib.dump(feature_encoder, feature_encoder_path)
+        feature_encoder_paths.append(feature_encoder_path)
     elif feature_type == "word2vec":
-        feature_encoder.save(str(feature_encoder_path))
+        word2vec_path = models_dir / f"{artifact_name}_word2vec_model.model"
+        feature_encoder["word2vec"].save(str(word2vec_path))
+        feature_encoder_paths.append(word2vec_path)
+
+        if feature_encoder.get("tfidf") is not None:
+            tfidf_path = models_dir / f"{artifact_name}_tfidf_weighting_vectorizer.pkl"
+            joblib.dump(feature_encoder["tfidf"], tfidf_path)
+            feature_encoder_paths.append(tfidf_path)
     else:
         raise ValueError(f"Unsupported feature type: {feature_type}")
 
     print(f"Saved model to: {model_path}")
-    print(f"Saved feature encoder to: {feature_encoder_path}")
+    for feature_encoder_path in feature_encoder_paths:
+        print(f"Saved feature encoder to: {feature_encoder_path}")
 
     with open(outputs_dir / f"{artifact_name}_config.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
@@ -434,7 +486,8 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
         mlflow.log_artifact(str(outputs_dir / f"{artifact_name}_config.yaml"), artifact_path="outputs")
         mlflow.log_artifact(str(outputs_dir / f"{artifact_name}_history.yaml"), artifact_path="outputs")
         mlflow.log_artifacts(str(checkpoints_dir), artifact_path="checkpoints")
-        mlflow.log_artifact(str(feature_encoder_path), artifact_path="models")
+        for feature_encoder_path in feature_encoder_paths:
+            mlflow.log_artifact(str(feature_encoder_path), artifact_path="models")
         mlflow.pytorch.log_model(model.cpu(), artifact_path="model")
 
         epochs_axis = np.arange(1, len(history["train_loss"]) + 1)
