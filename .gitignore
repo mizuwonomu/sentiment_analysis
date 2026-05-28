@@ -26,3 +26,6 @@ reports/figure/
 #tracking
 mlflow.db
 mlruns/
+
+#agent memory, skills
+data/
