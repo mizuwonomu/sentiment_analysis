@@ -6,13 +6,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import yaml
-from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+from sklearn.metrics import confusion_matrix
 
 
 FIGURE_DIR = Path("reports") / "figure"
 
 
-def load_config(config_path: str | os.PathLike = "configs/baseline.yaml") -> Dict[str, Any]:
+def load_config(config_path: str | os.PathLike = "configs/experiment.yaml") -> Dict[str, Any]:
     """Load YAML configuration file with PyYAML."""
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -94,11 +94,20 @@ def plot_confusion_matrix(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cm = confusion_matrix(y_true, y_pred)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
-
     fig, ax = plt.subplots(figsize=(7, 6))
-    disp.plot(ax=ax, cmap="Blues", values_format="d", colorbar=False)
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=labels,
+        yticklabels=labels,
+        cbar=True,
+        ax=ax,
+    )
     ax.set_title(f"{model_name.upper()} Confusion Matrix")
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
     plt.tight_layout()
 
     output_path = output_dir / f"{model_name}_confusion_matrix.png"

@@ -2,23 +2,25 @@ import random
 import os
 import importlib.util
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns   
-import mlflow
-import mlflow.pytorch
 import numpy as np
 import torch
 import torch.nn as nn
 import yaml
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset
 
 from .data_loader import FeedbackProcessor
+from .embeddings import (
+    texts_to_mean_vectors,
+    texts_to_tfidf_weighted_vectors,
+    train_word2vec,
+)
 from .models import ANNClassifier
 from .utils import load_config
 
@@ -53,11 +55,124 @@ def resolve_device(device_cfg: str) -> str:
     return device_cfg
 
 
-def prepare_ann_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, TfidfVectorizer]:
+def _get_feature_type(config: Dict) -> str:
+    return config.get("features", {}).get("type", "tfidf").lower()
+
+
+def _get_feature_tag(feature_type: str) -> str:
+    return "w2vec" if feature_type == "word2vec" else feature_type
+
+
+def _is_meaningful_loss_improvement(current_loss: float, best_loss: float, min_delta: float) -> bool:
+    return current_loss < best_loss - min_delta
+
+
+def _is_loss_plateauing(val_losses: list[float], window: int, fluctuation_delta: float) -> bool:
+    if window <= 1 or len(val_losses) < window:
+        return False
+
+    recent_losses = val_losses[-window:]
+    loss_range = max(recent_losses) - min(recent_losses)
+    return loss_range <= fluctuation_delta and recent_losses[-1] >= recent_losses[0]
+
+
+def _prepare_feature_matrices(
+    config: Dict,
+    train_texts: list[str],
+    val_texts: list[str],
+    feature_encoder: Any = None,
+) -> Tuple[np.ndarray, np.ndarray, Any]:
+    data_cfg = config["data"]
+    features_cfg = config.get("features", {})
+    feature_type = _get_feature_type(config)
+
+    if feature_type == "tfidf":
+        tfidf_cfg = features_cfg.get("tfidf", {})
+        max_features = tfidf_cfg.get(
+            "max_features",
+            data_cfg.get("max_features", data_cfg.get("max_Features")),
+        )
+        tfidf = feature_encoder or TfidfVectorizer(max_features=max_features)
+        if feature_encoder is None:
+            x_train = tfidf.fit_transform(train_texts).toarray()
+        else:
+            x_train = tfidf.transform(train_texts).toarray()
+        x_val = tfidf.transform(val_texts).toarray()
+        return x_train, x_val, tfidf
+
+    if feature_type == "word2vec":
+        word2vec_cfg = features_cfg["word2vec"]
+        pooling = word2vec_cfg.get("pooling", "mean")
+        if pooling not in {"mean", "tfidf_weighted_mean"}:
+            raise ValueError(
+                "Only mean and tfidf_weighted_mean pooling are currently supported "
+                "for Word2Vec features."
+            )
+
+        vector_size = word2vec_cfg["vector_size"]
+        embedding_source = word2vec_cfg.get("embedding_source", "input")
+        train_tokens = [text.split() for text in train_texts]
+        val_tokens = [text.split() for text in val_texts]
+
+        if isinstance(feature_encoder, dict):
+            word2vec = feature_encoder["word2vec"]
+            tfidf = feature_encoder.get("tfidf")
+        else:
+            word2vec = feature_encoder or train_word2vec(train_tokens, word2vec_cfg)
+            tfidf = None
+
+        if pooling == "mean":
+            x_train = texts_to_mean_vectors(
+                train_tokens,
+                word2vec,
+                vector_size,
+                embedding_source=embedding_source,
+            )
+            x_val = texts_to_mean_vectors(
+                val_tokens,
+                word2vec,
+                vector_size,
+                embedding_source=embedding_source,
+            )
+            return x_train, x_val, {"word2vec": word2vec}
+
+        tfidf_cfg = features_cfg.get("tfidf", {})
+        max_features = tfidf_cfg.get(
+            "max_features",
+            data_cfg.get("max_features", data_cfg.get("max_Features")),
+        )
+        if tfidf is None:
+            tfidf = TfidfVectorizer(max_features=max_features)
+            train_tfidf = tfidf.fit_transform(train_texts)
+        else:
+            train_tfidf = tfidf.transform(train_texts)
+        val_tfidf = tfidf.transform(val_texts)
+
+        x_train = texts_to_tfidf_weighted_vectors(
+            train_tokens,
+            train_tfidf,
+            tfidf.vocabulary_,
+            word2vec,
+            vector_size,
+            embedding_source=embedding_source,
+        )
+        x_val = texts_to_tfidf_weighted_vectors(
+            val_tokens,
+            val_tfidf,
+            tfidf.vocabulary_,
+            word2vec,
+            vector_size,
+            embedding_source=embedding_source,
+        )
+        return x_train, x_val, {"word2vec": word2vec, "tfidf": tfidf}
+
+    raise ValueError(f"Unsupported feature type: {feature_type}")
+
+
+def prepare_ann_dataloaders(config: Dict, feature_encoder: Any = None) -> Tuple[DataLoader, DataLoader, Any]:
     data_cfg = config["data"]
     training_cfg = config["training"]
     device = resolve_device(training_cfg["device"])
-    max_features = data_cfg.get("max_features", data_cfg.get("max_Features"))
 
     processor = FeedbackProcessor(max_length=data_cfg["max_length"], device=device)
     processor.load_data()
@@ -65,25 +180,27 @@ def prepare_ann_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, Tfidf
     train_texts = [processor.process_text(item["sentence"]) for item in processor.train_raw]
     train_labels = [item["sentiment"] for item in processor.train_raw]
 
-    tfidf = TfidfVectorizer(max_features=max_features)
-    x_tfidf = tfidf.fit_transform(train_texts).toarray()
-
-    x_tensor = torch.tensor(x_tfidf, dtype=torch.float32)
-    y_tensor = torch.tensor(train_labels, dtype=torch.long)
-
-    full_train_dataset = TensorDataset(x_tensor, y_tensor)
-
-    train_loader = DataLoader(full_train_dataset, batch_size=training_cfg["batch_size"], shuffle=True)
-
     val_texts = [processor.process_text(item["sentence"]) for item in processor.val_raw]
     val_labels = [item["sentiment"] for item in processor.val_raw]
-    x_val_tfidf = tfidf.transform(val_texts).toarray()
-    x_val_tensor = torch.tensor(x_val_tfidf, dtype=torch.float32)
+
+    x_train, x_val, fitted_feature_encoder = _prepare_feature_matrices(
+        config,
+        train_texts,
+        val_texts,
+        feature_encoder=feature_encoder,
+    )
+
+    x_tensor = torch.tensor(x_train, dtype=torch.float32)
+    y_tensor = torch.tensor(train_labels, dtype=torch.long)
+    full_train_dataset = TensorDataset(x_tensor, y_tensor)
+    train_loader = DataLoader(full_train_dataset, batch_size=training_cfg["batch_size"], shuffle=True)
+
+    x_val_tensor = torch.tensor(x_val, dtype=torch.float32)
     y_val_tensor = torch.tensor(val_labels, dtype=torch.long)
     val_ds = TensorDataset(x_val_tensor, y_val_tensor)
     val_loader = DataLoader(val_ds, batch_size=training_cfg["batch_size"], shuffle=False)
 
-    return train_loader, val_loader, tfidf
+    return train_loader, val_loader, fitted_feature_encoder
 
 
 def build_model(config: Dict) -> nn.Module:
@@ -105,15 +222,18 @@ def build_model(config: Dict) -> nn.Module:
     )
 
 
-def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list]:
+def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, list]:
     config = load_config(config_path)
     set_seed(config["training"]["seed"])
 
     device = resolve_device(config["training"]["device"])
     model = build_model(config).to(device)
     model_name = config["models"]["model_name"].lower()
+    feature_type = _get_feature_type(config)
+    feature_tag = _get_feature_tag(feature_type)
+    artifact_name = f"{model_name}_{feature_tag}"
 
-    train_loader, val_loader, tfidf = prepare_ann_dataloaders(config)
+    train_loader, val_loader, feature_encoder = prepare_ann_dataloaders(config)
 
     checkpoints_dir = Path("checkpoints")
     outputs_dir = Path("outputs")
@@ -152,6 +272,14 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
         mlflow.set_experiment(tracking_cfg.get("experiment_name", "vsfc_ann_baseline"))
 
     epochs = config["training"]["epochs"]
+    early_stopping_cfg = config["training"].get("early_stopping", {})
+    early_stopping_enabled = early_stopping_cfg.get("enabled", False)
+    early_stopping_patience = early_stopping_cfg.get("patience", 3)
+    early_stopping_min_delta = early_stopping_cfg.get("min_delta", 0.001)
+    early_stopping_fluctuation_delta = early_stopping_cfg.get("fluctuation_delta", 0.05)
+    early_stopping_window = early_stopping_patience + 1
+    epochs_without_meaningful_improvement = 0
+
     run_name = tracking_cfg.get("run_name", f"{model_name}_baseline")
     run_ctx = mlflow.start_run(run_name=run_name) if should_log_mlflow else None
     if should_log_mlflow:
@@ -206,7 +334,7 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
 
         checkpoint_payload = {
             "epoch": epoch + 1,
-            "model_name": model_name,
+            "model_name": artifact_name,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "train_loss": train_loss,
@@ -215,13 +343,30 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
             "val_acc": val_acc,
             "config": config,
         }
-        epoch_ckpt_path = checkpoints_dir / f"{model_name}_epoch_{epoch + 1:02d}.pt"
+        epoch_ckpt_path = checkpoints_dir / f"{artifact_name}_epoch_{epoch + 1:02d}.pt"
         torch.save(checkpoint_payload, epoch_ckpt_path)
+
+        has_meaningful_improvement = _is_meaningful_loss_improvement(
+            val_loss,
+            best_val_loss,
+            early_stopping_min_delta,
+        )
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch + 1
-            torch.save(checkpoint_payload, checkpoints_dir / f"{model_name}_best_model.pt")
+            torch.save(checkpoint_payload, checkpoints_dir / f"{artifact_name}_best_model.pt")
+
+        if has_meaningful_improvement:
+            epochs_without_meaningful_improvement = 0
+        else:
+            epochs_without_meaningful_improvement += 1
+
+        is_plateauing = _is_loss_plateauing(
+            history["val_loss"],
+            early_stopping_window,
+            early_stopping_fluctuation_delta,
+        )
 
         if should_log_mlflow:
             mlflow.log_metrics(
@@ -241,33 +386,77 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
             f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}"
         )
 
+        if early_stopping_enabled and not has_meaningful_improvement:
+            print(
+                "Early stopping monitor: "
+                f"{epochs_without_meaningful_improvement}/{early_stopping_patience} "
+                "epochs without validation-loss improvement. "
+                f"Best Val Loss: {best_val_loss:.4f}"
+            )
+
+        if (
+            early_stopping_enabled
+            and (
+                epochs_without_meaningful_improvement >= early_stopping_patience
+                or is_plateauing
+            )
+        ):
+            print(
+                "Early stopping triggered: "
+                f"validation loss did not improve by at least {early_stopping_min_delta:.4f} "
+                f"for {early_stopping_patience} consecutive epochs, or plateaued within "
+                f"{early_stopping_fluctuation_delta:.4f}. "
+                f"Best epoch: {best_epoch} | Best Val Loss: {best_val_loss:.4f}"
+            )
+            break
+
+    epochs_ran = len(history["train_loss"])
+
     torch.save(
         {
-            "epoch": epochs,
-            "model_name": model_name,
+            "epoch": epochs_ran,
+            "model_name": artifact_name,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "history": history,
             "config": config,
+            "best_epoch": best_epoch,
+            "best_val_loss": best_val_loss,
         },
-        checkpoints_dir / f"{model_name}_last_model.pt",
+        checkpoints_dir / f"{artifact_name}_last_model.pt",
     )
 
     models_dir = Path("models")
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    model_path = models_dir / f"{model_name}_baseline_model.pt"
-    vectorizer_path = models_dir / "tfidf_vectorizer.pkl"
+    model_path = models_dir / f"{artifact_name}_baseline_model.pt"
+    feature_encoder_paths = []
 
     torch.save(model.state_dict(), model_path)
-    joblib.dump(tfidf, vectorizer_path)
-    print(f"Saved model to: {model_path}")
-    print(f"Saved vectorizer to: {vectorizer_path}")
+    if feature_type == "tfidf":
+        feature_encoder_path = models_dir / f"{artifact_name}_tfidf_vectorizer.pkl"
+        joblib.dump(feature_encoder, feature_encoder_path)
+        feature_encoder_paths.append(feature_encoder_path)
+    elif feature_type == "word2vec":
+        word2vec_path = models_dir / f"{artifact_name}_word2vec_model.model"
+        feature_encoder["word2vec"].save(str(word2vec_path))
+        feature_encoder_paths.append(word2vec_path)
 
-    with open(outputs_dir / f"{model_name}_config.yaml", "w", encoding="utf-8") as f:
+        if feature_encoder.get("tfidf") is not None:
+            tfidf_path = models_dir / f"{artifact_name}_tfidf_weighting_vectorizer.pkl"
+            joblib.dump(feature_encoder["tfidf"], tfidf_path)
+            feature_encoder_paths.append(tfidf_path)
+    else:
+        raise ValueError(f"Unsupported feature type: {feature_type}")
+
+    print(f"Saved model to: {model_path}")
+    for feature_encoder_path in feature_encoder_paths:
+        print(f"Saved feature encoder to: {feature_encoder_path}")
+
+    with open(outputs_dir / f"{artifact_name}_config.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
 
-    with open(outputs_dir / f"{model_name}_history.yaml", "w", encoding="utf-8") as f:
+    with open(outputs_dir / f"{artifact_name}_history.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(history, f, sort_keys=False, allow_unicode=True)
 
     model.eval()
@@ -294,10 +483,11 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
 
     if should_log_mlflow:
         mlflow.log_metrics(eval_metrics)
-        mlflow.log_artifact(str(outputs_dir / f"{model_name}_config.yaml"), artifact_path="outputs")
-        mlflow.log_artifact(str(outputs_dir / f"{model_name}_history.yaml"), artifact_path="outputs")
+        mlflow.log_artifact(str(outputs_dir / f"{artifact_name}_config.yaml"), artifact_path="outputs")
+        mlflow.log_artifact(str(outputs_dir / f"{artifact_name}_history.yaml"), artifact_path="outputs")
         mlflow.log_artifacts(str(checkpoints_dir), artifact_path="checkpoints")
-        mlflow.log_artifact(str(vectorizer_path), artifact_path="models")
+        for feature_encoder_path in feature_encoder_paths:
+            mlflow.log_artifact(str(feature_encoder_path), artifact_path="models")
         mlflow.pytorch.log_model(model.cpu(), artifact_path="model")
 
         epochs_axis = np.arange(1, len(history["train_loss"]) + 1)
@@ -309,7 +499,7 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
         ax_loss.set_ylabel("Loss")
         ax_loss.legend()
         fig_loss.tight_layout()
-        mlflow.log_figure(fig_loss, f"figures/{model_name}_loss_curve.png")
+        mlflow.log_figure(fig_loss, f"figures/{artifact_name}_loss_curve.png")
         plt.close(fig_loss)
 
         fig_acc, ax_acc = plt.subplots(figsize=(8, 5))
@@ -320,7 +510,7 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
         ax_acc.set_ylabel("Accuracy")
         ax_acc.legend()
         fig_acc.tight_layout()
-        mlflow.log_figure(fig_acc, f"figures/{model_name}_accuracy_curve.png")
+        mlflow.log_figure(fig_acc, f"figures/{artifact_name}_accuracy_curve.png")
         plt.close(fig_acc)
 
         cm = confusion_matrix(final_val_targets, final_val_preds)
@@ -330,7 +520,7 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
         ax_cm.set_xlabel("Predicted")
         ax_cm.set_ylabel("True")
         fig_cm.tight_layout()
-        mlflow.log_figure(fig_cm, f"figures/{model_name}_confusion_matrix.png")
+        mlflow.log_figure(fig_cm, f"figures/{artifact_name}_confusion_matrix.png")
         plt.close(fig_cm)
 
         mlflow.end_run()
@@ -343,4 +533,4 @@ def train_baseline(config_path: str = "configs/baseline.yaml") -> Dict[str, list
 
 
 if __name__ == "__main__":
-    train_baseline("configs/baseline.yaml")
+    train_baseline("configs/experiment.yaml")
