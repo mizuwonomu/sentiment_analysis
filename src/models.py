@@ -1,6 +1,7 @@
 from typing import Iterable, List
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence
 
 
 class ANNClassifier(nn.Module):
@@ -72,9 +73,15 @@ class LSTMClassifier(nn.Module):
         self.classifier = nn.Linear(hidden_size * direction_multiplier, output_dim)
         self.bidirectional = bidirectional
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
         embedded = self.embedding(x)
-        _, (hidden, _) = self.lstm(embedded)
+        packed_embedded = pack_padded_sequence(
+            embedded,
+            lengths.detach().cpu().clamp(min=1),
+            batch_first=True,
+            enforce_sorted=False,
+        )
+        _, (hidden, _) = self.lstm(packed_embedded)
 
         if self.bidirectional:
             final_hidden = torch.cat((hidden[-2], hidden[-1]), dim=1)

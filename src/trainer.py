@@ -254,11 +254,17 @@ def prepare_lstm_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, Dict
     processor.load_data()
     processor.build_vocab(min_freq=data_cfg.get("min_freq", 1))
 
-    x_train, y_train = processor.prepare_tensors(processor.train_raw)
-    x_val, y_val = processor.prepare_tensors(processor.val_raw)
+    x_train, y_train, train_lengths = processor.prepare_tensors(
+        processor.train_raw,
+        return_lengths=True,
+    )
+    x_val, y_val, val_lengths = processor.prepare_tensors(
+        processor.val_raw,
+        return_lengths=True,
+    )
 
-    train_ds = TensorDataset(x_train.cpu(), y_train.cpu())
-    val_ds = TensorDataset(x_val.cpu(), y_val.cpu())
+    train_ds = TensorDataset(x_train.cpu(), train_lengths.cpu(), y_train.cpu())
+    val_ds = TensorDataset(x_val.cpu(), val_lengths.cpu(), y_val.cpu())
     train_loader = DataLoader(train_ds, batch_size=training_cfg["batch_size"], shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=training_cfg["batch_size"], shuffle=False)
 
@@ -288,6 +294,21 @@ def prepare_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, Any]:
     if model_name == "lstm":
         return prepare_lstm_dataloaders(config)
     raise ValueError(f"Unsupported model_name: {model_name}. Supported models: ann, lstm.")
+
+
+def _unpack_batch(batch: Tuple[torch.Tensor, ...], device: str) -> Tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
+    if len(batch) == 3:
+        x_batch, lengths, y_batch = batch
+        return x_batch.to(device), lengths.to(device), y_batch.to(device)
+
+    x_batch, y_batch = batch
+    return x_batch.to(device), None, y_batch.to(device)
+
+
+def _forward_model(model: nn.Module, x_batch: torch.Tensor, lengths: torch.Tensor | None) -> torch.Tensor:
+    if lengths is None:
+        return model(x_batch)
+    return model(x_batch, lengths)
 
 
 def build_model(config: Dict, embedding_matrix: torch.Tensor | None = None) -> nn.Module:
@@ -390,12 +411,11 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
         train_loss_sum = 0.0
         train_preds, train_targets = [], []
 
-        for x_batch, y_batch in train_loader:
-            x_batch = x_batch.to(device)
-            y_batch = y_batch.to(device)
+        for batch in train_loader:
+            x_batch, lengths, y_batch = _unpack_batch(batch, device)
 
             optimizer.zero_grad()
-            logits = model(x_batch)
+            logits = _forward_model(model, x_batch, lengths)
             loss = criterion(logits, y_batch)
             loss.backward()
             optimizer.step()
@@ -412,11 +432,10 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
         val_loss_sum = 0.0
         val_preds, val_targets = [], []
         with torch.no_grad():
-            for x_batch, y_batch in val_loader:
-                x_batch = x_batch.to(device)
-                y_batch = y_batch.to(device)
+            for batch in val_loader:
+                x_batch, lengths, y_batch = _unpack_batch(batch, device)
 
-                logits = model(x_batch)
+                logits = _forward_model(model, x_batch, lengths)
                 loss = criterion(logits, y_batch)
                 val_loss_sum += loss.item()
 
@@ -570,9 +589,9 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
     model.eval()
     final_val_preds, final_val_targets = [], []
     with torch.no_grad():
-        for x_batch, y_batch in val_loader:
-            x_batch = x_batch.to(device)
-            logits = model(x_batch)
+        for batch in val_loader:
+            x_batch, lengths, y_batch = _unpack_batch(batch, device)
+            logits = _forward_model(model, x_batch, lengths)
             preds = torch.argmax(logits, dim=1)
             final_val_preds.extend(preds.detach().cpu().numpy())
             final_val_targets.extend(y_batch.detach().cpu().numpy())
