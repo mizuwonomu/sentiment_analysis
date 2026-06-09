@@ -341,6 +341,42 @@ def build_model(config: Dict, embedding_matrix: torch.Tensor | None = None) -> n
     raise ValueError(f"Unsupported model_name: {model_name}. Supported models: ann, lstm.")
 
 
+def build_optimizer(model: nn.Module, config: Dict) -> torch.optim.Optimizer:
+    training_cfg = config["training"]
+    default_lr = training_cfg["learning_rate"]
+    embedding_lr = training_cfg.get("embedding_learning_rate")
+    weight_decay = training_cfg["weight_decay"]
+
+    embedding = getattr(model, "embedding", None)
+    if embedding is None or embedding_lr is None or not embedding.weight.requires_grad:
+        return torch.optim.Adam(
+            [param for param in model.parameters() if param.requires_grad],
+            lr=default_lr,
+            weight_decay=weight_decay,
+        )
+
+    embedding_param_ids = {id(param) for param in embedding.parameters()}
+    non_embedding_params = [
+        param
+        for param in model.parameters()
+        if param.requires_grad and id(param) not in embedding_param_ids
+    ]
+
+    return torch.optim.Adam(
+        [
+            {
+                "params": [param for param in embedding.parameters() if param.requires_grad],
+                "lr": embedding_lr,
+            },
+            {
+                "params": non_embedding_params,
+                "lr": default_lr,
+            },
+        ],
+        weight_decay=weight_decay,
+    )
+
+
 def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, list]:
     config = load_config(config_path)
     set_seed(config["training"]["seed"])
@@ -368,11 +404,7 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
     class_weights = class_weights.to(device)
 
     criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=config["training"]["learning_rate"],
-        weight_decay=config["training"]["weight_decay"],
-    )
+    optimizer = build_optimizer(model, config)
 
     history = {
         "train_loss": [],
