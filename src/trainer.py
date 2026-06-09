@@ -14,14 +14,16 @@ import yaml
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
 from torch.utils.data import DataLoader, TensorDataset
+from gensim.models import Word2Vec
 
 from .data_loader import FeedbackProcessor
 from .embeddings import (
+    get_word_vector,
     texts_to_mean_vectors,
     texts_to_tfidf_weighted_vectors,
     train_word2vec,
 )
-from .models import ANNClassifier
+from .models import ANNClassifier, LSTMClassifier
 from .utils import load_config
 
 MLFLOW_AVAILABLE = importlib.util.find_spec("mlflow") is not None
@@ -61,6 +63,12 @@ def _get_feature_type(config: Dict) -> str:
 
 def _get_feature_tag(feature_type: str) -> str:
     return "w2vec" if feature_type == "word2vec" else feature_type
+
+
+def _get_artifact_name(config: Dict) -> str:
+    model_name = config["models"]["model_name"].lower()
+    feature_type = _get_feature_type(config)
+    return f"{model_name}_{_get_feature_tag(feature_type)}"
 
 
 def _is_meaningful_loss_improvement(current_loss: float, best_loss: float, min_delta: float) -> bool:
@@ -203,23 +211,113 @@ def prepare_ann_dataloaders(config: Dict, feature_encoder: Any = None) -> Tuple[
     return train_loader, val_loader, fitted_feature_encoder
 
 
-def build_model(config: Dict) -> nn.Module:
+def _load_saved_word2vec(config: Dict) -> Word2Vec:
+    word2vec_cfg = config.get("features", {}).get("word2vec", {})
+    model_path = word2vec_cfg.get("model_path", "models/ann_w2vec_word2vec_model.model")
+    model_path = Path(model_path)
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Word2Vec model not found at {model_path}. "
+            "Train the ANN Word2Vec baseline first or update features.word2vec.model_path."
+        )
+    return Word2Vec.load(str(model_path))
+
+
+def _build_embedding_matrix(
+    vocab: Dict[str, int],
+    word2vec: Word2Vec,
+    embedding_dim: int,
+    embedding_source: str = "input",
+) -> torch.Tensor:
+    if word2vec.wv.vectors.shape[1] != embedding_dim:
+        raise ValueError(
+            f"LSTM embedding_dim={embedding_dim} does not match "
+            f"Word2Vec vector_size={word2vec.wv.vectors.shape[1]}."
+        )
+
+    embedding_matrix = np.zeros((len(vocab), embedding_dim), dtype=np.float32)
+    for token, token_id in vocab.items():
+        if token in word2vec.wv.key_to_index:
+            embedding_matrix[token_id] = get_word_vector(
+                token,
+                word2vec,
+                embedding_source=embedding_source,
+            )
+
+    return torch.tensor(embedding_matrix, dtype=torch.float32)
+
+
+def prepare_lstm_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, Dict[str, Any]]:
+    data_cfg = config["data"]
+    training_cfg = config["training"]
+    processor = FeedbackProcessor(max_length=data_cfg["max_length"], device="cpu")
+    processor.load_data()
+    processor.build_vocab(min_freq=data_cfg.get("min_freq", 1))
+
+    x_train, y_train = processor.prepare_tensors(processor.train_raw)
+    x_val, y_val = processor.prepare_tensors(processor.val_raw)
+
+    train_ds = TensorDataset(x_train.cpu(), y_train.cpu())
+    val_ds = TensorDataset(x_val.cpu(), y_val.cpu())
+    train_loader = DataLoader(train_ds, batch_size=training_cfg["batch_size"], shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=training_cfg["batch_size"], shuffle=False)
+
+    word2vec = _load_saved_word2vec(config)
+    word2vec_cfg = config["features"]["word2vec"]
+    lstm_cfg = config["models"]["lstm"]
+    embedding_dim = lstm_cfg.get("embedding_dim", word2vec_cfg["vector_size"])
+    embedding_matrix = _build_embedding_matrix(
+        processor.vocab,
+        word2vec,
+        embedding_dim,
+        embedding_source=word2vec_cfg.get("embedding_source", "input"),
+    )
+
+    return train_loader, val_loader, {
+        "processor": processor,
+        "word2vec": word2vec,
+        "embedding_matrix": embedding_matrix,
+        "word2vec_path": word2vec_cfg.get("model_path", "models/ann_w2vec_word2vec_model.model"),
+    }
+
+
+def prepare_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader, Any]:
+    model_name = config["models"]["model_name"].lower()
+    if model_name == "ann":
+        return prepare_ann_dataloaders(config)
+    if model_name == "lstm":
+        return prepare_lstm_dataloaders(config)
+    raise ValueError(f"Unsupported model_name: {model_name}. Supported models: ann, lstm.")
+
+
+def build_model(config: Dict, embedding_matrix: torch.Tensor | None = None) -> nn.Module:
     model_cfg = config["models"]
     model_name = model_cfg["model_name"].lower()
 
-    if model_name != "ann":
-        raise ValueError(
-            f"Unsupported model_name: {model_name}. "
-            "Only ANN is currently supported by this trainer."
+    if model_name == "ann":
+        ann_cfg = model_cfg["ann"]
+        return ANNClassifier(
+            input_dim=ann_cfg["input_dim"],
+            hidden_dims=ann_cfg["hidden_dims"],
+            output_dim=ann_cfg["output_dim"],
+            dropout=ann_cfg["dropout"],
         )
 
-    ann_cfg = model_cfg["ann"]
-    return ANNClassifier(
-        input_dim=ann_cfg["input_dim"],
-        hidden_dims=ann_cfg["hidden_dims"],
-        output_dim=ann_cfg["output_dim"],
-        dropout=ann_cfg["dropout"],
-    )
+    if model_name == "lstm":
+        if embedding_matrix is None:
+            raise ValueError("embedding_matrix is required when model_name is lstm.")
+        lstm_cfg = model_cfg["lstm"]
+        return LSTMClassifier(
+            embedding_matrix=embedding_matrix,
+            hidden_size=lstm_cfg["hidden_size"],
+            num_layers=lstm_cfg["num_layers"],
+            output_dim=lstm_cfg["output_dim"],
+            dropout=lstm_cfg.get("dropout", 0.0),
+            bidirectional=lstm_cfg.get("bidirectional", False),
+            freeze_embeddings=lstm_cfg.get("freeze_embeddings", True),
+        )
+
+    raise ValueError(f"Unsupported model_name: {model_name}. Supported models: ann, lstm.")
 
 
 def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, list]:
@@ -227,13 +325,15 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
     set_seed(config["training"]["seed"])
 
     device = resolve_device(config["training"]["device"])
-    model = build_model(config).to(device)
     model_name = config["models"]["model_name"].lower()
     feature_type = _get_feature_type(config)
-    feature_tag = _get_feature_tag(feature_type)
-    artifact_name = f"{model_name}_{feature_tag}"
+    artifact_name = _get_artifact_name(config)
 
-    train_loader, val_loader, feature_encoder = prepare_ann_dataloaders(config)
+    train_loader, val_loader, feature_encoder = prepare_dataloaders(config)
+    embedding_matrix = None
+    if model_name == "lstm":
+        embedding_matrix = feature_encoder["embedding_matrix"]
+    model = build_model(config, embedding_matrix=embedding_matrix).to(device)
 
     checkpoints_dir = Path("checkpoints")
     outputs_dir = Path("outputs")
@@ -433,7 +533,15 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
     feature_encoder_paths = []
 
     torch.save(model.state_dict(), model_path)
-    if feature_type == "tfidf":
+    if model_name == "lstm":
+        embedding_matrix_path = models_dir / f"{artifact_name}_embedding_matrix.pt"
+        torch.save(feature_encoder["embedding_matrix"], embedding_matrix_path)
+        feature_encoder_paths.append(embedding_matrix_path)
+
+        word2vec_path = Path(feature_encoder["word2vec_path"])
+        if word2vec_path.exists():
+            feature_encoder_paths.append(word2vec_path)
+    elif feature_type == "tfidf":
         feature_encoder_path = models_dir / f"{artifact_name}_tfidf_vectorizer.pkl"
         joblib.dump(feature_encoder, feature_encoder_path)
         feature_encoder_paths.append(feature_encoder_path)
@@ -473,18 +581,29 @@ def train_baseline(config_path: str = "configs/experiment.yaml") -> Dict[str, li
         final_val_targets, final_val_preds, average="macro", zero_division=0
     )
     eval_metrics = {
-        "final_val_accuracy": accuracy_score(final_val_targets, final_val_preds),
-        "final_val_precision": precision,
-        "final_val_recall": recall,
-        "final_val_f1": f1,
-        "best_val_loss": best_val_loss,
-        "best_epoch": best_epoch,
+        "final_val_accuracy": float(accuracy_score(final_val_targets, final_val_preds)),
+        "final_val_precision": float(precision),
+        "final_val_recall": float(recall),
+        "final_val_f1": float(f1),
+        "best_val_loss": float(best_val_loss),
+        "best_epoch": int(best_epoch),
+        "confusion_matrix": confusion_matrix(final_val_targets, final_val_preds).tolist(),
     }
 
+    with open(outputs_dir / f"{artifact_name}_metrics.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(eval_metrics, f, sort_keys=False, allow_unicode=True)
+
     if should_log_mlflow:
-        mlflow.log_metrics(eval_metrics)
+        mlflow.log_metrics(
+            {
+                key: value
+                for key, value in eval_metrics.items()
+                if isinstance(value, (int, float))
+            }
+        )
         mlflow.log_artifact(str(outputs_dir / f"{artifact_name}_config.yaml"), artifact_path="outputs")
         mlflow.log_artifact(str(outputs_dir / f"{artifact_name}_history.yaml"), artifact_path="outputs")
+        mlflow.log_artifact(str(outputs_dir / f"{artifact_name}_metrics.yaml"), artifact_path="outputs")
         mlflow.log_artifacts(str(checkpoints_dir), artifact_path="checkpoints")
         for feature_encoder_path in feature_encoder_paths:
             mlflow.log_artifact(str(feature_encoder_path), artifact_path="models")
