@@ -94,24 +94,32 @@ class FeedbackProcessor:
         else:
             return sequence[:self.max_length]
     
-    def prepare_tensors(self, data_split):
+    def prepare_tensors(self, data_split, return_lengths=False):
         input_ids = []
         labels = []
+        lengths = []
 
         for item in data_split:
             processed = self.process_text(item['sentence'])
 
             #Encode: chuyển chữ thành ID, không có trong vocab -> dùng <UNK>
             ids = [self.vocab.get(word, self.vocab["<UNK>"]) for word in processed.split()]
+            length = min(len(ids), self.max_length)
 
             #Padding and transition
             padded_ids = self._pad_sequence(ids)
 
             input_ids.append(padded_ids)
             labels.append(item['sentiment'])
+            lengths.append(length)
 
-        return (torch.tensor(input_ids, dtype=torch.long).to(self.device),
-                torch.tensor(labels, dtype=torch.long).to(self.device))
+        tensors = (
+            torch.tensor(input_ids, dtype=torch.long).to(self.device),
+            torch.tensor(labels, dtype=torch.long).to(self.device),
+        )
+        if return_lengths:
+            return (*tensors, torch.tensor(lengths, dtype=torch.long).to(self.device))
+        return tensors
 
     def save_processed(
         self,
