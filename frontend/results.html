@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kết quả thực nghiệm — SentiVie</title>
+  <meta name="description" content="Kết quả so sánh ANN+TF-IDF và LSTM+Word2Vec trên tập validation và test set phân tích cảm xúc tiếng Việt." />
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- Chart.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+
+  <div class="page-wrapper">
+
+    <!-- ── Navigation ── -->
+    <nav class="navbar">
+      <div class="container navbar-inner">
+        <a href="index.html" class="navbar-brand">
+          <div class="brand-icon">🧠</div>
+          <div>
+            <div class="brand-name">SentiVie</div>
+            <div class="brand-sub">Vietnamese Sentiment Analysis</div>
+          </div>
+        </a>
+        <ul class="navbar-nav">
+          <li><a href="index.html" class="nav-link">Demo</a></li>
+          <li><a href="results.html" class="nav-link active">Kết quả</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <!-- ── Hero ── -->
+    <section class="hero" style="padding-bottom:32px">
+      <div class="container">
+        <div class="hero-badge">
+          <span>📊</span> Multi-seed Evaluation
+        </div>
+        <h1 class="hero-title">
+          Kết quả <span class="gradient-text">thực nghiệm</span>
+        </h1>
+        <p class="hero-desc">
+          Đánh giá trên 4 random seed để giảm ảnh hưởng của may mắn khởi tạo.
+          Kết quả cuối là trung bình ± độ lệch chuẩn.
+        </p>
+      </div>
+    </section>
+
+    <main>
+      <div class="container">
+
+        <!-- ── Validation Results ── -->
+        <section class="mb-32">
+          <h2 class="section-title">📋 Kết quả Validation (Multi-seed)</h2>
+          <p class="section-desc">Dùng để lựa chọn mô hình và tinh chỉnh siêu tham số.</p>
+
+          <div class="two-col">
+            <div class="card">
+              <h3 class="card-title"><span class="icon">📑</span> Bảng so sánh</h3>
+              <table class="metrics-table">
+                <thead>
+                  <tr>
+                    <th>Mô hình</th>
+                    <th>Accuracy</th>
+                    <th>Precision</th>
+                    <th>Recall</th>
+                    <th>Macro F1</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="model-name">ANN + TF-IDF</td>
+                    <td>0.8929 <span class="text-muted">±0.0024</span></td>
+                    <td>0.7483 <span class="text-muted">±0.0025</span></td>
+                    <td>0.8208 <span class="text-muted">±0.0077</span></td>
+                    <td>0.7706 <span class="text-muted">±0.0019</span></td>
+                  </tr>
+                  <tr>
+                    <td class="model-name" style="color:var(--cyan-light)">LSTM + Word2Vec</td>
+                    <td class="best">0.8932 <span class="text-muted" style="font-weight:400">±0.0025</span></td>
+                    <td class="best">0.7586 <span class="text-muted" style="font-weight:400">±0.0064</span></td>
+                    <td class="best">0.8216 <span class="text-muted" style="font-weight:400">±0.0070</span></td>
+                    <td class="best">0.7807 <span class="text-muted" style="font-weight:400">±0.0063</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="card">
+              <h3 class="card-title"><span class="icon">📈</span> Biểu đồ so sánh</h3>
+              <div class="chart-container">
+                <canvas id="chart-validation"></canvas>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- ── Test Results ── -->
+        <section class="mb-32">
+          <h2 class="section-title">🎯 Kết quả Test (Multi-seed)</h2>
+          <p class="section-desc">Đánh giá cuối cùng trên dữ liệu chưa thấy. Không dùng để điều chỉnh mô hình.</p>
+
+          <div class="two-col">
+            <div class="card">
+              <h3 class="card-title"><span class="icon">📑</span> Bảng so sánh</h3>
+              <table class="metrics-table">
+                <thead>
+                  <tr>
+                    <th>Mô hình</th>
+                    <th>Accuracy</th>
+                    <th>Precision</th>
+                    <th>Recall</th>
+                    <th>Macro F1</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="model-name">ANN + TF-IDF</td>
+                    <td>0.8628 <span class="text-muted">±0.0023</span></td>
+                    <td>0.7137 <span class="text-muted">±0.0023</span></td>
+                    <td>0.7629 <span class="text-muted">±0.0035</span></td>
+                    <td>0.7282 <span class="text-muted">±0.0024</span></td>
+                  </tr>
+                  <tr>
+                    <td class="model-name" style="color:var(--cyan-light)">LSTM + Word2Vec</td>
+                    <td class="best">0.8707 <span class="text-muted" style="font-weight:400">±0.0019</span></td>
+                    <td class="best">0.7273 <span class="text-muted" style="font-weight:400">±0.0012</span></td>
+                    <td class="best">0.7868 <span class="text-muted" style="font-weight:400">±0.0063</span></td>
+                    <td class="best">0.7444 <span class="text-muted" style="font-weight:400">±0.0018</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="card">
+              <h3 class="card-title"><span class="icon">📈</span> Biểu đồ so sánh</h3>
+              <div class="chart-container">
+                <canvas id="chart-test"></canvas>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- ── Improvement ── -->
+        <section class="mb-32">
+          <h2 class="section-title">🚀 Mức độ cải thiện (LSTM vs ANN)</h2>
+          <p class="section-desc">Trên tập test, LSTM + Word2Vec vượt trội ANN + TF-IDF ở tất cả 4 metrics.</p>
+
+          <div class="two-col">
+            <div class="card">
+              <h3 class="card-title"><span class="icon">📊</span> Improvement chart</h3>
+              <div class="chart-container" style="height:200px">
+                <canvas id="chart-improvement"></canvas>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3 class="card-title"><span class="icon">✅</span> Chi tiết cải thiện</h3>
+              <div class="improvement-row">
+                <span class="improvement-metric">Accuracy</span>
+                <span class="improvement-value">+0.0079</span>
+              </div>
+              <div class="improvement-row">
+                <span class="improvement-metric">Macro Precision</span>
+                <span class="improvement-value">+0.0136</span>
+              </div>
+              <div class="improvement-row">
+                <span class="improvement-metric">Macro Recall</span>
+                <span class="improvement-value">+0.0239</span>
+              </div>
+              <div class="improvement-row">
+                <span class="improvement-metric">Macro F1 ⭐</span>
+                <span class="improvement-value">+0.0162</span>
+              </div>
+              <div class="text-muted mt-20" style="font-size:12px;line-height:1.6">
+                ⭐ <strong style="color:var(--text-secondary)">Macro F1</strong> là metric quan trọng nhất
+                vì dataset mất cân bằng và class Trung lập khó phân loại hơn.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- ── Visualization ── -->
+        <section class="mb-32">
+          <h2 class="section-title">🖼️ Biểu đồ đánh giá (Seed 42)</h2>
+          <p class="section-desc">
+            Một seed đại diện. Kết quả cuối được tính trên 4 seed để đảm bảo độ ổn định.
+          </p>
+
+          <div class="image-comparison">
+            <div class="eval-image-wrap">
+              <img
+                src="assets/test_seed42_confusion_comparison.png"
+                alt="Confusion matrix comparison between ANN+TF-IDF and LSTM+Word2Vec"
+                loading="lazy"
+              />
+              <p class="eval-image-caption">
+                Hình 1. So sánh confusion matrix giữa ANN+TF-IDF và LSTM+Word2Vec trên seed 42
+              </p>
+            </div>
+            <div class="eval-image-wrap">
+              <img
+                src="assets/test_seed42_metrics_comparison.png"
+                alt="Metric bar chart comparison between ANN+TF-IDF and LSTM+Word2Vec"
+                loading="lazy"
+              />
+              <p class="eval-image-caption">
+                Hình 2. So sánh các metrics giữa ANN+TF-IDF và LSTM+Word2Vec trên seed 42
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- ── Key Findings ── -->
+        <section class="mb-32">
+          <h2 class="section-title">🔍 Key Findings</h2>
+          <p class="section-desc">Những phát hiện chính từ thực nghiệm.</p>
+
+          <div class="finding-item">
+            <span class="finding-icon">📌</span>
+            <div>
+              <div class="finding-title">TF-IDF là baseline mạnh</div>
+              <div class="finding-desc">
+                ANN + TF-IDF hoạt động tốt vì nhiều câu phản hồi sinh viên chứa từ khóa cảm xúc rõ ràng.
+                Tuy nhiên, TF-IDF không bảo toàn thứ tự từ nên gặp khó với phủ định và đối lập.
+              </div>
+            </div>
+          </div>
+
+          <div class="finding-item">
+            <span class="finding-icon">🔮</span>
+            <div>
+              <div class="finding-title">LSTM nắm bắt ngữ cảnh tốt hơn</div>
+              <div class="finding-desc">
+                LSTM + Word2Vec đọc câu tuần tự, giúp mô hình xử lý phủ định, cấu trúc đối lập,
+                và cảm xúc hỗn hợp tốt hơn. Ví dụ: <em>"Nhiệt tình nhưng giải thích khó hiểu"</em>
+                — LSTM xử lý cấu trúc này hiệu quả hơn.
+              </div>
+            </div>
+          </div>
+
+          <div class="finding-item">
+            <span class="finding-icon">📉</span>
+            <div>
+              <div class="finding-title">Class Trung lập là khó nhất</div>
+              <div class="finding-desc">
+                Phản hồi Trung lập thường ít từ khóa cảm xúc rõ ràng và dễ nhầm với Tích cực/Tiêu cực yếu.
+                LSTM cải thiện nhận dạng class này — đây là lý do chính dẫn đến Macro F1 cao hơn.
+              </div>
+            </div>
+          </div>
+
+          <div class="finding-item">
+            <span class="finding-icon">🏆</span>
+            <div>
+              <div class="finding-title">LSTM + Word2Vec là mô hình tốt nhất</div>
+              <div class="finding-desc">
+                Với Macro F1 = <strong>0.7444 ± 0.0018</strong> trên test set (so với 0.7282 ± 0.0024 của ANN),
+                LSTM vượt trội ở tất cả metrics và ổn định hơn qua nhiều seed.
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div><!-- end container -->
+    </main>
+
+    <!-- ── Footer ── -->
+    <footer class="footer">
+      <div class="container">
+        <p class="footer-text">
+          SentiVie · Vietnamese Student Feedback Sentiment Analysis ·
+          <a href="index.html">← Quay lại Demo</a>
+        </p>
+      </div>
+    </footer>
+
+  </div><!-- end page-wrapper -->
+
+  <script src="js/charts.js"></script>
+</body>
+</html>
