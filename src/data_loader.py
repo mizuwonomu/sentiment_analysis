@@ -94,26 +94,43 @@ class FeedbackProcessor:
         else:
             return sequence[:self.max_length]
     
-    def prepare_tensors(self, data_split):
+    def prepare_tensors(self, data_split, return_lengths=False):
         input_ids = []
         labels = []
+        lengths = []
 
         for item in data_split:
             processed = self.process_text(item['sentence'])
 
             #Encode: chuyển chữ thành ID, không có trong vocab -> dùng <UNK>
             ids = [self.vocab.get(word, self.vocab["<UNK>"]) for word in processed.split()]
+            length = min(len(ids), self.max_length)
 
             #Padding and transition
             padded_ids = self._pad_sequence(ids)
 
             input_ids.append(padded_ids)
             labels.append(item['sentiment'])
+            lengths.append(length)
 
-        return (torch.tensor(input_ids, dtype=torch.long).to(self.device),
-                torch.tensor(labels, dtype=torch.long).to(self.device))
+        tensors = (
+            torch.tensor(input_ids, dtype=torch.long).to(self.device),
+            torch.tensor(labels, dtype=torch.long).to(self.device),
+        )
+        if return_lengths:
+            return (*tensors, torch.tensor(lengths, dtype=torch.long).to(self.device))
+        return tensors
 
-    def save_processed(self, path="datasets/processed", X_train=None, y_train=None, x_test=None, y_test=None):
+    def save_processed(
+        self,
+        path="datasets/processed",
+        X_train=None,
+        y_train=None,
+        x_test=None,
+        y_test=None,
+        X_val=None,
+        y_val=None,
+    ):
         if not os.path.exists(path):
             os.makedirs(path)
         
@@ -125,14 +142,26 @@ class FeedbackProcessor:
             "X_train": X_train, "y_train": y_train,
             "x_test": x_test, "y_test": y_test
         }
+        if X_val is not None and y_val is not None:
+            data["X_val"] = X_val
+            data["y_val"] = y_val
         torch.save(data, f"{path}/tensors.pt")
         print(f"---Đã đóng gói dữ liệu tại {path}---")
 
-    def load_processed(self, path="datasets/processed"):
+    def load_processed(self, path="datasets/processed", include_validation=False):
         with open(f"{path}/vocab.json", "r", encoding="utf-8") as f:
             self.vocab = json.load(f)
             self.id_to_word = {int(v): k for k,v in self.vocab.items()}
 
         data = torch.load(f"{path}/tensors.pt", map_location=self.device)
         print("---Đã load dữ liệu từ ổ cứng!! ----")
+        if include_validation:
+            return (
+                data["X_train"],
+                data["y_train"],
+                data["x_test"],
+                data["y_test"],
+                data.get("X_val"),
+                data.get("y_val"),
+            )
         return data["X_train"], data["y_train"], data["x_test"], data["y_test"]

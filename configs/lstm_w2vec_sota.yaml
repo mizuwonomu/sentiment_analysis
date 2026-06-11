@@ -1,0 +1,61 @@
+data:
+  dataset_name: chapter544ou/vietnamese_students_feedback
+  max_length: 50
+  min_freq: 2
+
+features:
+  type: word2vec
+  tfidf:
+    max_features: 1000
+  word2vec:
+    vector_size: 100 
+    window: 5
+    min_count: 1
+    sg: 0 
+    negative: 5
+    epochs: 30
+    workers: 4
+    seed: 42
+    pooling: mean 
+    embedding_source: input 
+    model_path: models/ann_w2vec_word2vec_model.model
+
+models:
+  model_name: lstm
+  ann:
+    input_dim: 100 
+    hidden_dims: [64, 32]
+    output_dim: 3
+    dropout: 0.3
+  lstm:
+    embedding_dim: 100
+    hidden_size: 128
+    num_layers: 1
+    bidirectional: false
+    freeze_embeddings: true
+    output_dim: 3
+    dropout: 0.3
+
+training:
+  epochs: 50 
+  early_stopping:
+    enabled: true
+    patience: 6
+    min_delta: 0.0001
+    fluctuation_delta: 0.01
+  batch_size: 32
+  learning_rate: 0.0001
+  embedding_learning_rate: 0.00001
+  class_weights: [0.674, 4.000, 0.715]
+  weight_decay: 0.001
+  seed: 42
+  device: auto
+
+logging:
+  enabled: false
+
+tracking:
+  mlflow:
+    experiment_name: vsfc_lstm_baseline
+    run_name: lstm_w2vec_unfrozen_split_lr
+    tracking_uri: file:./mlruns
