@@ -68,7 +68,11 @@ def _get_feature_tag(feature_type: str) -> str:
 def _get_artifact_name(config: Dict) -> str:
     model_name = config["models"]["model_name"].lower()
     feature_type = _get_feature_type(config)
-    return f"{model_name}_{_get_feature_tag(feature_type)}"
+    artifact_name = f"{model_name}_{_get_feature_tag(feature_type)}"
+    artifact_suffix = config.get("tracking", {}).get("artifact_suffix")
+    if artifact_suffix:
+        return f"{artifact_name}_{artifact_suffix}"
+    return artifact_name
 
 
 def _is_meaningful_loss_improvement(current_loss: float, best_loss: float, min_delta: float) -> bool:
