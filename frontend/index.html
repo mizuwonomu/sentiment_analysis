@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SentiVie — Demo Phân Tích Cảm Xúc Tiếng Việt</title>
+  <meta name="description" content="Demo phân tích cảm xúc phản hồi sinh viên tiếng Việt sử dụng ANN + TF-IDF và LSTM + Word2Vec." />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- Background orbs -->
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+
+  <div class="page-wrapper">
+
+    <!-- ── Navigation ── -->
+    <nav class="navbar">
+      <div class="container navbar-inner">
+        <a href="index.html" class="navbar-brand">
+          <div class="brand-icon">🧠</div>
+          <div>
+            <div class="brand-name">SentiVie</div>
+            <div class="brand-sub">Vietnamese Sentiment Analysis</div>
+          </div>
+        </a>
+        <ul class="navbar-nav">
+          <li><a href="index.html" class="nav-link active">Demo</a></li>
+          <li><a href="results.html" class="nav-link">Kết quả</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <!-- ── Hero ── -->
+    <section class="hero">
+      <div class="container">
+        <div class="hero-badge">
+          <span>🎓</span> Vietnamese Student Feedback
+        </div>
+        <h1 class="hero-title">
+          Phân tích cảm xúc<br />
+          <span class="gradient-text">phản hồi sinh viên</span>
+        </h1>
+        <p class="hero-desc">
+          So sánh hai phương pháp học máy: <strong>ANN + TF-IDF</strong> (dựa trên tần suất từ)
+          và <strong>LSTM + Word2Vec</strong> (dựa trên chuỗi ngữ nghĩa).
+          Nhập câu phản hồi tiếng Việt để thử nghiệm.
+        </p>
+        <div class="hero-stats">
+          <div class="hero-stat">
+            <div class="hero-stat-value">0.7444</div>
+            <div class="hero-stat-label">LSTM Macro F1</div>
+          </div>
+          <div class="hero-stat">
+            <div class="hero-stat-value">0.8707</div>
+            <div class="hero-stat-label">LSTM Accuracy</div>
+          </div>
+          <div class="hero-stat">
+            <div class="hero-stat-value">3 class</div>
+            <div class="hero-stat-label">Neg · Neu · Pos</div>
+          </div>
+          <div class="hero-stat">
+            <div class="hero-stat-value">4 seeds</div>
+            <div class="hero-stat-label">Multi-seed eval</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Main Content ── -->
+    <main>
+      <div class="container">
+
+        <!-- Prediction section -->
+        <section id="predict-section" class="mb-32">
+          <div class="two-col">
+
+            <!-- Left: Input panel -->
+            <div class="card">
+              <h2 class="card-title"><span class="icon">✍️</span> Nhập phản hồi</h2>
+
+              <div class="form-group">
+                <label class="form-label" for="feedback-input">Câu phản hồi tiếng Việt</label>
+                <textarea
+                  id="feedback-input"
+                  class="form-textarea"
+                  placeholder="Ví dụ: Giảng viên rất nhiệt tình, giải thích dễ hiểu và luôn hỗ trợ sinh viên..."
+                  rows="5"
+                ></textarea>
+                <div class="text-muted mt-20">
+                  💡 Nhấn <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-size:11px;">Ctrl + Enter</kbd> để phân tích nhanh
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="model-select">Chọn mô hình</label>
+                <select id="model-select" class="form-select">
+                  <option value="lstm">🔮 LSTM + Word2Vec (Tốt hơn)</option>
+                  <option value="ann">📊 ANN + TF-IDF (Baseline)</option>
+                </select>
+              </div>
+
+              <button id="predict-btn" class="btn btn-primary">
+                <span>🔍</span> Phân tích cảm xúc
+              </button>
+
+              <!-- Result panel -->
+              <div id="result-panel" class="result-panel">
+                <div class="divider"></div>
+
+                <div class="result-label-row">
+                  <span id="result-label" class="result-label positive">
+                    😊 Tích cực
+                  </span>
+                  <span id="result-confidence" class="result-confidence">
+                    Độ tin cậy: <strong>-</strong>
+                  </span>
+                </div>
+
+                <div class="prob-bars mb-20">
+                  <div class="prob-row">
+                    <span class="prob-label">😊 Tích cực</span>
+                    <div class="prob-track"><div id="bar-positive" class="prob-fill positive"></div></div>
+                    <span id="val-positive" class="prob-value">-</span>
+                  </div>
+                  <div class="prob-row">
+                    <span class="prob-label">😐 Trung lập</span>
+                    <div class="prob-track"><div id="bar-neutral" class="prob-fill neutral"></div></div>
+                    <span id="val-neutral" class="prob-value">-</span>
+                  </div>
+                  <div class="prob-row">
+                    <span class="prob-label">😞 Tiêu cực</span>
+                    <div class="prob-track"><div id="bar-negative" class="prob-fill negative"></div></div>
+                    <span id="val-negative" class="prob-value">-</span>
+                  </div>
+                </div>
+
+                <div class="text-muted">
+                  Mô hình: <span class="model-badge" id="result-model">-</span>
+                  &nbsp;·&nbsp; Giai đoạn 1: kết quả mock (rule-based)
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: How it works -->
+            <div>
+              <div class="card mb-20">
+                <h3 class="card-title"><span class="icon">🔮</span> LSTM + Word2Vec</h3>
+                <div class="text-muted mb-12" style="font-size:13px;line-height:1.7">
+                  Đọc câu như một <strong style="color:var(--cyan-light)">chuỗi token</strong>,
+                  giữ nguyên thứ tự từ và cập nhật trạng thái ẩn qua từng bước.
+                  Hiệu quả hơn với phủ định, đối lập, và cảm xúc hỗn hợp.
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);font-family:monospace;background:rgba(255,255,255,0.03);padding:12px;border-radius:8px;line-height:1.8">
+                  Input → Token IDs<br/>
+                  → Word2Vec Embeddings<br/>
+                  → LSTM Encoder<br/>
+                  → Classifier → Label
+                </div>
+                <div class="mt-20">
+                  <span class="tag tag-cyan">Test Macro F1: 0.7444</span>
+                  &nbsp;
+                  <span class="tag tag-violet">Best model ✓</span>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3 class="card-title"><span class="icon">📊</span> ANN + TF-IDF</h3>
+                <div class="text-muted mb-12" style="font-size:13px;line-height:1.7">
+                  Biểu diễn câu dưới dạng <strong style="color:var(--violet-light)">vector tần suất từ</strong>.
+                  Hiệu quả với sentiment rõ ràng qua từ khóa, nhưng không bảo toàn thứ tự.
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);font-family:monospace;background:rgba(255,255,255,0.03);padding:12px;border-radius:8px;line-height:1.8">
+                  Input → Tokenize<br/>
+                  → TF-IDF Vector<br/>
+                  → ANN Classifier<br/>
+                  → Label
+                </div>
+                <div class="mt-20">
+                  <span class="tag tag-violet">Test Macro F1: 0.7282</span>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- end two-col -->
+        </section>
+
+        <!-- Example sentences -->
+        <section class="examples-section">
+          <h2 class="section-title">💬 Câu mẫu để thử nghiệm</h2>
+          <p class="section-desc">Click vào câu bên dưới để điền tự động vào ô nhập.</p>
+
+          <div class="examples-grid">
+
+            <!-- Positive examples -->
+            <div class="example-chip" onclick="useExample('Giảng viên rất nhiệt tình, giải thích dễ hiểu và luôn hỗ trợ sinh viên khi gặp khó khăn.')">
+              <div class="example-chip-text">Giảng viên rất nhiệt tình, giải thích dễ hiểu và luôn hỗ trợ sinh viên khi gặp khó khăn.</div>
+              <span class="example-chip-tag positive">😊 Tích cực</span>
+            </div>
+
+            <div class="example-chip" onclick="useExample('Môn học rất hữu ích, nội dung phong phú và phương pháp giảng dạy sáng tạo, thú vị.')">
+              <div class="example-chip-text">Môn học rất hữu ích, nội dung phong phú và phương pháp giảng dạy sáng tạo, thú vị.</div>
+              <span class="example-chip-tag positive">😊 Tích cực</span>
+            </div>
+
+            <!-- Neutral examples -->
+            <div class="example-chip" onclick="useExample('Giảng viên nhiệt tình nhưng cách giải thích của thầy hơi khó hiểu với một số sinh viên.')">
+              <div class="example-chip-text">Giảng viên nhiệt tình nhưng cách giải thích của thầy hơi khó hiểu với một số sinh viên.</div>
+              <span class="example-chip-tag neutral">😐 Trung lập</span>
+            </div>
+
+            <div class="example-chip" onclick="useExample('Nội dung môn học ổn, tuy nhiên bài tập về nhà khá nhiều và đôi khi gây áp lực.')">
+              <div class="example-chip-text">Nội dung môn học ổn, tuy nhiên bài tập về nhà khá nhiều và đôi khi gây áp lực.</div>
+              <span class="example-chip-tag neutral">😐 Trung lập</span>
+            </div>
+
+            <!-- Negative examples -->
+            <div class="example-chip" onclick="useExample('Thầy giảng quá nhanh, không giải thích rõ ràng khiến sinh viên rất khó theo kịp bài.')">
+              <div class="example-chip-text">Thầy giảng quá nhanh, không giải thích rõ ràng khiến sinh viên rất khó theo kịp bài.</div>
+              <span class="example-chip-tag negative">😞 Tiêu cực</span>
+            </div>
+
+            <div class="example-chip" onclick="useExample('Môn học nhàm chán, nội dung lỗi thời và không có sự kết nối với thực tế nghề nghiệp.')">
+              <div class="example-chip-text">Môn học nhàm chán, nội dung lỗi thời và không có sự kết nối với thực tế nghề nghiệp.</div>
+              <span class="example-chip-tag negative">😞 Tiêu cực</span>
+            </div>
+
+          </div>
+        </section>
+
+      </div><!-- end container -->
+    </main>
+
+    <!-- ── Footer ── -->
+    <footer class="footer">
+      <div class="container">
+        <p class="footer-text">
+          SentiVie · Vietnamese Student Feedback Sentiment Analysis ·
+          <a href="results.html">Xem kết quả thực nghiệm →</a>
+        </p>
+      </div>
+    </footer>
+
+  </div><!-- end page-wrapper -->
+
+  <script src="js/predict.js"></script>
+</body>
+</html>
