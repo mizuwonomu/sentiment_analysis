@@ -105,7 +105,7 @@ const CONTRAST_WORDS = ['nhưng', 'tuy nhiên', 'song', 'dù vậy', 'dù thế'
  * }
  */
 
-  async function callAPI(text) {
+  async function callAPI(text, model) {
     const response = await fetch(
       "http://127.0.0.1:8000/predict",
       {
@@ -115,6 +115,7 @@ const CONTRAST_WORDS = ['nhưng', 'tuy nhiên', 'song', 'dù vậy', 'dù thế'
         },
         body: JSON.stringify({
           text: text,
+          model: model
         }),
       }
     );
@@ -177,10 +178,11 @@ async function runPrediction() {
   btn.innerHTML = '<div class="spinner"></div> Đang phân tích...';
 
   // Simulate network delay (replace with real fetch in giai đoạn 2)
-  await new Promise(r => setTimeout(r, 700 + Math.random() * 400));
+  /*await new Promise(r => setTimeout(r, 700 + Math.random() * 400));*/
 
-  const probs = await callAPI(text);
   const modelName = modelSel.value;
+  console.log("Đang sử dụng model: " + modelName);
+  const probs = await callAPI(text, modelName);
   const labelInfo = getLabelInfo(probs);
 
   // ── Render result ──
