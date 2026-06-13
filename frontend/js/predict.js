@@ -8,7 +8,7 @@
 
 // ── Keyword dictionaries ──────────────────────────────────────────────────
 
-const POSITIVE_KEYWORDS = [
+/*const POSITIVE_KEYWORDS = [
   'tốt', 'giỏi', 'hay', 'xuất sắc', 'tuyệt', 'tuyệt vời', 'hài lòng',
   'nhiệt tình', 'dễ hiểu', 'rõ ràng', 'thú vị', 'hữu ích', 'hiệu quả',
   'tận tâm', 'cảm ơn', 'thích', 'yêu thích', 'bổ ích', 'ấn tượng',
@@ -31,12 +31,12 @@ const NEGATION_WORDS = ['không', 'chưa', 'chẳng', 'chả', 'không hề', 'c
 const CONTRAST_WORDS = ['nhưng', 'tuy nhiên', 'song', 'dù vậy', 'dù thế', 'tuy', 'mặc dù'];
 
 // ── Core mock prediction ──────────────────────────────────────────────────
-
+*/
 /**
  * Phân tích câu tiếng Việt → trả về xác suất 3 class.
  * Logic đơn giản nhưng có xử lý negation và contrast.
  */
-function mockPredict(text) {
+/*function mockPredict(text) {
   const lower = text.toLowerCase();
   const tokens = lower.split(/\s+/);
 
@@ -86,7 +86,7 @@ function mockPredict(text) {
     neutral:  expNeu / total,
     negative: expNeg / total,
   };
-}
+}*/
 
 // ── Future API integration ────────────────────────────────────────────────
 
@@ -104,6 +104,27 @@ function mockPredict(text) {
  *   return { positive: data.positive, neutral: data.neutral, negative: data.negative };
  * }
  */
+
+  async function callAPI(text) {
+    const response = await fetch(
+      "http://127.0.0.1:8000/predict",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: text,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Backend request failed");
+    }
+
+    return await response.json();
+  }
 
 // ── UI helpers ────────────────────────────────────────────────────────────
 
@@ -158,7 +179,7 @@ async function runPrediction() {
   // Simulate network delay (replace with real fetch in giai đoạn 2)
   await new Promise(r => setTimeout(r, 700 + Math.random() * 400));
 
-  const probs = mockPredict(text);
+  const probs = await callAPI(text);
   const modelName = modelSel.value;
   const labelInfo = getLabelInfo(probs);
 
