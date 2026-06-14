@@ -6,6 +6,8 @@
   <title>SentiVie — Demo Phân Tích Cảm Xúc Tiếng Việt</title>
   <meta name="description" content="Demo phân tích cảm xúc phản hồi sinh viên tiếng Việt sử dụng ANN + TF-IDF và LSTM + Word2Vec." />
   <link rel="stylesheet" href="css/style.css" />
+  <!-- Chart.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <!-- Background orbs -->
@@ -73,116 +75,70 @@
 
         <!-- Prediction section -->
         <section id="predict-section" class="mb-32">
-          <div class="two-col">
 
-            <!-- Left: Input panel -->
+          <!-- Input panel -->
+          <div class="card mb-20">
+            <h2 class="card-title"><span class="icon">✍️</span> Nhập phản hồi</h2>
+
+            <div class="form-group">
+              <label class="form-label" for="feedback-input">Câu phản hồi tiếng Việt</label>
+              <textarea
+                id="feedback-input"
+                class="form-textarea"
+                placeholder="Ví dụ: Giảng viên rất nhiệt tình, giải thích dễ hiểu và luôn hỗ trợ sinh viên..."
+                rows="5"
+              ></textarea>
+              <div class="text-muted mt-20">
+                💡 Nhấn <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-size:11px;">Ctrl + Enter</kbd> để phân tích nhanh
+                &nbsp;·&nbsp; Cả hai mô hình sẽ chạy đồng thời để so sánh.
+              </div>
+            </div>
+
+            <button id="predict-btn" class="btn btn-primary">
+              <span>🔍</span> Phân tích &amp; so sánh
+            </button>
+          </div>
+
+          <!-- Result / comparison panel -->
+          <div id="result-panel" class="result-panel">
             <div class="card">
-              <h2 class="card-title"><span class="icon">✍️</span> Nhập phản hồi</h2>
+              <h2 class="card-title"><span class="icon">📊</span> So sánh kết quả 2 mô hình</h2>
 
-              <div class="form-group">
-                <label class="form-label" for="feedback-input">Câu phản hồi tiếng Việt</label>
-                <textarea
-                  id="feedback-input"
-                  class="form-textarea"
-                  placeholder="Ví dụ: Giảng viên rất nhiệt tình, giải thích dễ hiểu và luôn hỗ trợ sinh viên..."
-                  rows="5"
-                ></textarea>
-                <div class="text-muted mt-20">
-                  💡 Nhấn <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-size:11px;">Ctrl + Enter</kbd> để phân tích nhanh
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label" for="model-select">Chọn mô hình</label>
-                <select id="model-select" class="form-select">
-                  <option value="lstm">🔮 LSTM + Word2Vec (Tốt hơn)</option>
-                  <option value="ann">📊 ANN + TF-IDF (Baseline)</option>
-                </select>
-              </div>
-
-              <button id="predict-btn" class="btn btn-primary">
-                <span>🔍</span> Phân tích cảm xúc
-              </button>
-
-              <!-- Result panel -->
-              <div id="result-panel" class="result-panel">
-                <div class="divider"></div>
-
-                <div class="result-label-row">
-                  <span id="result-label" class="result-label positive">
-                    😊 Tích cực
-                  </span>
-                  <span id="result-confidence" class="result-confidence">
+              <!-- Per-model verdict badges -->
+              <div class="result-label-row" style="gap:24px;flex-wrap:wrap">
+                <div>
+                  <div class="text-muted" style="font-size:12px;margin-bottom:4px">
+                    <span class="tag tag-violet">ANN + TF-IDF</span>
+                  </div>
+                  <span id="ann-label" class="result-label positive">😊 Tích cực</span>
+                  <div id="ann-confidence" class="result-confidence" style="margin-top:4px">
                     Độ tin cậy: <strong>-</strong>
-                  </span>
+                  </div>
                 </div>
+                <div>
+                  <div class="text-muted" style="font-size:12px;margin-bottom:4px">
+                    <span class="tag tag-cyan">LSTM + Word2Vec</span>
+                  </div>
+                  <span id="lstm-label" class="result-label positive">😊 Tích cực</span>
+                  <div id="lstm-confidence" class="result-confidence" style="margin-top:4px">
+                    Độ tin cậy: <strong>-</strong>
+                  </div>
+                </div>
+              </div>
 
-                <div class="prob-bars mb-20">
-                  <div class="prob-row">
-                    <span class="prob-label">😊 Tích cực</span>
-                    <div class="prob-track"><div id="bar-positive" class="prob-fill positive"></div></div>
-                    <span id="val-positive" class="prob-value">-</span>
-                  </div>
-                  <div class="prob-row">
-                    <span class="prob-label">😐 Trung lập</span>
-                    <div class="prob-track"><div id="bar-neutral" class="prob-fill neutral"></div></div>
-                    <span id="val-neutral" class="prob-value">-</span>
-                  </div>
-                  <div class="prob-row">
-                    <span class="prob-label">😞 Tiêu cực</span>
-                    <div class="prob-track"><div id="bar-negative" class="prob-fill negative"></div></div>
-                    <span id="val-negative" class="prob-value">-</span>
-                  </div>
-                </div>
+              <div class="divider"></div>
 
-                <div class="text-muted">
-                  Mô hình: <span class="model-badge" id="result-model">-</span>
-                  &nbsp;·&nbsp; Giai đoạn 1: kết quả mock (rule-based)
-                </div>
+              <!-- Grouped bar chart: 3 sentiment classes × 2 models -->
+              <div style="position:relative;height:340px">
+                <canvas id="chart-compare"></canvas>
+              </div>
+
+              <div class="text-muted mt-20" style="font-size:12px">
+                Mỗi nhóm là một lớp cảm xúc; hai cột là xác suất của ANN và LSTM. Kết quả từ mô hình thực.
               </div>
             </div>
+          </div>
 
-            <!-- Right: How it works -->
-            <div>
-              <div class="card mb-20">
-                <h3 class="card-title"><span class="icon">🔮</span> LSTM + Word2Vec</h3>
-                <div class="text-muted mb-12" style="font-size:13px;line-height:1.7">
-                  Đọc câu như một <strong style="color:var(--cyan-light)">chuỗi token</strong>,
-                  giữ nguyên thứ tự từ và cập nhật trạng thái ẩn qua từng bước.
-                  Hiệu quả hơn với phủ định, đối lập, và cảm xúc hỗn hợp.
-                </div>
-                <div style="font-size:12px;color:var(--text-muted);font-family:monospace;background:rgba(255,255,255,0.03);padding:12px;border-radius:8px;line-height:1.8">
-                  Input → Token IDs<br/>
-                  → Word2Vec Embeddings<br/>
-                  → LSTM Encoder<br/>
-                  → Classifier → Label
-                </div>
-                <div class="mt-20">
-                  <span class="tag tag-cyan">Test Macro F1: 0.7444</span>
-                  &nbsp;
-                  <span class="tag tag-violet">Best model ✓</span>
-                </div>
-              </div>
-
-              <div class="card">
-                <h3 class="card-title"><span class="icon">📊</span> ANN + TF-IDF</h3>
-                <div class="text-muted mb-12" style="font-size:13px;line-height:1.7">
-                  Biểu diễn câu dưới dạng <strong style="color:var(--violet-light)">vector tần suất từ</strong>.
-                  Hiệu quả với sentiment rõ ràng qua từ khóa, nhưng không bảo toàn thứ tự.
-                </div>
-                <div style="font-size:12px;color:var(--text-muted);font-family:monospace;background:rgba(255,255,255,0.03);padding:12px;border-radius:8px;line-height:1.8">
-                  Input → Tokenize<br/>
-                  → TF-IDF Vector<br/>
-                  → ANN Classifier<br/>
-                  → Label
-                </div>
-                <div class="mt-20">
-                  <span class="tag tag-violet">Test Macro F1: 0.7282</span>
-                </div>
-              </div>
-            </div>
-
-          </div><!-- end two-col -->
         </section>
 
         <!-- Example sentences -->

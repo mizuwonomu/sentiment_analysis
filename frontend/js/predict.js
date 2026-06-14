@@ -8,7 +8,7 @@
 
 // ── Keyword dictionaries ──────────────────────────────────────────────────
 
-const POSITIVE_KEYWORDS = [
+/*const POSITIVE_KEYWORDS = [
   'tốt', 'giỏi', 'hay', 'xuất sắc', 'tuyệt', 'tuyệt vời', 'hài lòng',
   'nhiệt tình', 'dễ hiểu', 'rõ ràng', 'thú vị', 'hữu ích', 'hiệu quả',
   'tận tâm', 'cảm ơn', 'thích', 'yêu thích', 'bổ ích', 'ấn tượng',
@@ -31,12 +31,12 @@ const NEGATION_WORDS = ['không', 'chưa', 'chẳng', 'chả', 'không hề', 'c
 const CONTRAST_WORDS = ['nhưng', 'tuy nhiên', 'song', 'dù vậy', 'dù thế', 'tuy', 'mặc dù'];
 
 // ── Core mock prediction ──────────────────────────────────────────────────
-
+*/
 /**
  * Phân tích câu tiếng Việt → trả về xác suất 3 class.
  * Logic đơn giản nhưng có xử lý negation và contrast.
  */
-function mockPredict(text) {
+/*function mockPredict(text) {
   const lower = text.toLowerCase();
   const tokens = lower.split(/\s+/);
 
@@ -86,7 +86,7 @@ function mockPredict(text) {
     neutral:  expNeu / total,
     negative: expNeg / total,
   };
-}
+}*/
 
 // ── Future API integration ────────────────────────────────────────────────
 
@@ -104,6 +104,31 @@ function mockPredict(text) {
  *   return { positive: data.positive, neutral: data.neutral, negative: data.negative };
  * }
  */
+
+  async function callBothAPI(text) {
+    const response = await fetch(
+      "http://127.0.0.1:8000/predict_both",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: text,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Backend request failed");
+    }
+
+    const data = await response.json();
+    if (data.error) {
+      throw new Error(data.error);
+    }
+    return data; // { ann: {...}, lstm: {...} }
+  }
 
 // ── UI helpers ────────────────────────────────────────────────────────────
 
@@ -131,12 +156,99 @@ function formatPct(val) {
   return (val * 100).toFixed(1) + '%';
 }
 
+// Update one model's verdict badge (label + confidence) from its probs.
+function renderVerdict(prefix, probs) {
+  const info = getLabelInfo(probs);
+  const labelEl = document.getElementById(`${prefix}-label`);
+  labelEl.className = `result-label ${info.key}`;
+  labelEl.innerHTML = `<span>${info.emoji}</span> ${info.label}`;
+  document.getElementById(`${prefix}-confidence`).innerHTML =
+    `Độ tin cậy: <strong>${formatPct(probs[info.key])}</strong>`;
+}
+
+// ── Comparison chart (3 sentiment classes × 2 models) ──────────────────────
+
+const CHART_VIOLET = '#7c3aed';
+const CHART_CYAN   = '#06b6d4';
+let compareChart = null;
+
+function renderCompareChart(ann, lstm) {
+  const ctx = document.getElementById('chart-compare');
+  if (!ctx) return;
+
+  // Class order matches the bar order on the results page: neg / neu / pos
+  const annData  = [ann.negative,  ann.neutral,  ann.positive];
+  const lstmData = [lstm.negative, lstm.neutral, lstm.positive];
+
+  const config = {
+    type: 'bar',
+    data: {
+      labels: ['😞 Tiêu cực', '😐 Trung lập', '😊 Tích cực'],
+      datasets: [
+        {
+          label: 'ANN + TF-IDF',
+          data: annData,
+          backgroundColor: 'rgba(124,58,237,0.15)',
+          borderColor: CHART_VIOLET,
+          borderWidth: 2,
+          borderRadius: 6,
+          borderSkipped: false,
+        },
+        {
+          label: 'LSTM + Word2Vec',
+          data: lstmData,
+          backgroundColor: 'rgba(6,182,212,0.15)',
+          borderColor: CHART_CYAN,
+          borderWidth: 2,
+          borderRadius: 6,
+          borderSkipped: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            boxWidth: 12, boxHeight: 12, borderRadius: 4,
+            usePointStyle: true, pointStyle: 'rectRounded',
+            padding: 20, color: '#a09dc0', font: { size: 12, weight: '500' },
+          },
+        },
+        tooltip: {
+          backgroundColor: 'rgba(13,11,30,0.95)',
+          borderColor: 'rgba(124,58,237,0.3)',
+          borderWidth: 1, padding: 12, cornerRadius: 10,
+          callbacks: { label: c => ` ${c.dataset.label}: ${(c.parsed.y * 100).toFixed(1)}%` },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          ticks: { color: '#a09dc0', font: { size: 13 } },
+        },
+        y: {
+          min: 0, max: 1,
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          ticks: { color: '#a09dc0', font: { size: 11 }, callback: v => (v * 100).toFixed(0) + '%' },
+        },
+      },
+      animation: { duration: 700, easing: 'easeOutQuart' },
+    },
+  };
+
+  // Re-render: destroy old chart so the canvas is reusable across submits.
+  if (compareChart) compareChart.destroy();
+  compareChart = new Chart(ctx, config);
+}
+
 // ── Main predict flow ─────────────────────────────────────────────────────
 
 async function runPrediction() {
-  const textarea  = document.getElementById('feedback-input');
-  const modelSel  = document.getElementById('model-select');
-  const btn       = document.getElementById('predict-btn');
+  const textarea    = document.getElementById('feedback-input');
+  const btn         = document.getElementById('predict-btn');
   const resultPanel = document.getElementById('result-panel');
 
   const text = textarea.value.trim();
@@ -155,52 +267,25 @@ async function runPrediction() {
   btn.disabled  = true;
   btn.innerHTML = '<div class="spinner"></div> Đang phân tích...';
 
-  // Simulate network delay (replace with real fetch in giai đoạn 2)
-  await new Promise(r => setTimeout(r, 700 + Math.random() * 400));
+  try {
+    const { ann, lstm } = await callBothAPI(text);
 
-  const probs = mockPredict(text);
-  const modelName = modelSel.value;
-  const labelInfo = getLabelInfo(probs);
+    // Per-model verdict badges
+    renderVerdict('ann', ann);
+    renderVerdict('lstm', lstm);
 
-  // ── Render result ──
-  // Label badge
-  document.getElementById('result-label').className = `result-label ${labelInfo.key}`;
-  document.getElementById('result-label').innerHTML =
-    `<span>${labelInfo.emoji}</span> ${labelInfo.label}`;
+    // Grouped comparison chart
+    renderCompareChart(ann, lstm);
 
-  // Confidence
-  document.getElementById('result-confidence').innerHTML =
-    `Độ tin cậy: <strong>${formatPct(probs[labelInfo.key])}</strong>`;
-
-  // Model used
-  const modelDisplay = modelName === 'lstm'
-    ? 'LSTM + Word2Vec' : 'ANN + TF-IDF';
-  document.getElementById('result-model').textContent = modelDisplay;
-
-  // Probability bars
-  const barPositive = document.getElementById('bar-positive');
-  const barNeutral  = document.getElementById('bar-neutral');
-  const barNegative = document.getElementById('bar-negative');
-
-  // Reset to 0 first
-  barPositive.style.width = '0%';
-  barNeutral.style.width  = '0%';
-  barNegative.style.width = '0%';
-
-  animateBar(barPositive, probs.positive);
-  animateBar(barNeutral,  probs.neutral);
-  animateBar(barNegative, probs.negative);
-
-  document.getElementById('val-positive').textContent = formatPct(probs.positive);
-  document.getElementById('val-neutral').textContent  = formatPct(probs.neutral);
-  document.getElementById('val-negative').textContent = formatPct(probs.negative);
-
-  // Show panel
-  resultPanel.classList.add('visible');
-
-  // Reset button
-  btn.disabled  = false;
-  btn.innerHTML = '<span>🔍</span> Phân tích cảm xúc';
+    // Show panel
+    resultPanel.classList.add('visible');
+  } catch (err) {
+    alert('Lỗi khi gọi backend: ' + err.message);
+  } finally {
+    // Reset button
+    btn.disabled  = false;
+    btn.innerHTML = '<span>🔍</span> Phân tích &amp; so sánh';
+  }
 }
 
 // ── Example sentences ─────────────────────────────────────────────────────
