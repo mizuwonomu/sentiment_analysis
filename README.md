@@ -207,14 +207,19 @@ The lower standard deviation of LSTM on Macro F1 also suggests that its performa
 
 The following figures show the comparison between ANN + TF-IDF and LSTM + Word2Vec on a representative test seed.
 
+<p align="center">
+  <img src="./assets/03_evals/test_seed42_confusion_comparison.png" alt="Confusion matrix comparison between ANN + TF-IDF and LSTM + Word2Vec">
+</p>
+<p align="center">
+  <i>Figure 1. Test confusion matrix comparison between ANN + TF-IDF and LSTM + Word2Vec on a representative seed</i><br>
+</p>
 
-
-*Figure 1. Test confusion matrix comparison between ANN + TF-IDF and LSTM + Word2Vec on a representative seed*  
-
-
-
-
-*Figure 2. Test metric comparison between ANN + TF-IDF and LSTM + Word2Vec on a representative seed*  
+<p align="center">
+  <img src="./assets/03_evals/test_seed42_metrics_comparison.png" alt="Metric comparison between ANN + TF-IDF and LSTM + Word2Vec">
+</p>
+<p align="center">
+  <i>Figure 2. Test metric comparison between ANN + TF-IDF and LSTM + Word2Vec on a representative seed</i><br>
+</p>
 
 
 > Note: The figures above are shown for one representative seed.
