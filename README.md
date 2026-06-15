@@ -99,6 +99,10 @@ This project compares two different representation strategies:
 
 ---
 
+<p align="center">
+  <img src="./assets/comparision_model.png" alt="Model comparison between ANN + TF-IDF and LSTM + Word2Vec">
+</p>
+
 ### ANN + TF-IDF
 
 ```text
